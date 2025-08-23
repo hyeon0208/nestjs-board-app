@@ -48,6 +48,94 @@
 
 <br>
 
+## Nest CLI commands
+
+📑 공식문서 : https://docs.nestjs.com/cli/usages
+
+> - nest new|n → 프로젝트 생성
+> - nest build → 빌드
+> - nest start → 실행
+> - nest info|i → 환경 정보 확인
+> - nest add → 라이브러리 추가
+> - nest generate|g → 모듈/서비스/컨트롤러 등 코드 자동 생성 (단축어 포함)
+
+### 📦 `nest new|n [name]`
+
+- 새로운 NestJS 애플리케이션 생성
+
+```bash
+nest new my-app
+nest n my-app
+```
+
+### 🛠️ nest build [app]
+
+애플리케이션을 빌드하여 dist/ 디렉토리에 결과물을 생성한다.
+모노레포(monorepo) 구조에서는 특정 앱만 지정해 빌드할 수도 있다.
+
+```bash
+nest build
+nest build user-service
+```
+
+### 🚀 nest start [app]
+
+애플리케이션을 실행한다.
+개발 환경에서는 --watch 옵션을 사용하여 파일 변경 시 자동으로 재시작할 수 있다.
+
+```bash
+nest start
+nest start --watch
+```
+
+### ℹ️ nest info|i
+
+현재 프로젝트의 환경 정보를 출력한다.
+Nest 버전, Node.js 버전, OS, 패키지 매니저 등을 확인할 수 있다.
+
+```bash
+nest info
+nest i
+```
+
+### ➕ nest add <library>
+
+NestJS 애플리케이션에 새로운 기능을 추가하거나 기존의 라이브러리(예: GraphQL, Mongoose 등)를 연동할 때 사용한다.
+이 명령어는 npm install 또는 yarn add와 유사하지만, NestJS의 스키매틱(schematic)을 실행하여 해당 패키지와 관련된 설정이나 파일 생성 등의 추가 작업을 자동으로 처리해준다.
+(실제로 실행했을 때 아직은 잘 동작하지 않는 것 같다. schematics를 지원하는 라이브러리만 가능해보임.)
+
+```bash
+nest add @nestjs/graphql
+nest add @nestjs/mongoose
+nest add @nestjs/typeorm
+```
+
+=> Swagger 공식 문서 (통합 잘 돼 있음) : https://docs.nestjs.com/openapi/introduction
+
+## Nest CLI `generate` command list
+
+| name              | alias       | 설명                                                                                                                                                                                              |
+| ----------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **application**   | application | 새 NestJS 애플리케이션 워크스페이스를 만든다. 프로젝트를 시작할 때 전체 뼈대를 자동 생성.                                                                                                         |
+| **class**         | cl          | 단순한 클래스 파일을 만든다. DTO, 헬퍼 유틸 등 자유롭게 활용 가능.                                                                                                                                |
+| **configuration** | config      | CLI 실행에 필요한 설정 파일(`nest-cli.json`)을 만든다. 빌드/경로 설정 관리용.                                                                                                                     |
+| **controller**    | co          | 요청을 받는 컨트롤러를 만든다. 라우팅 처리 담당 (`@Get`, `@Post` 등).                                                                                                                             |
+| **decorator**     | d           | 커스텀 데코레이터를 만든다. 메서드나 파라미터에 붙여서 동작을 추가할 때 사용.                                                                                                                     |
+| **gateway**       | ga          | WebSocket 게이트웨이를 만든다. 실시간 채팅이나 알림 같은 기능에 사용.                                                                                                                             |
+| **interface**     | itf         | TypeScript 인터페이스를 만든다. 객체 구조를 정의할 때 사용.                                                                                                                                       |
+| **library**       | lib         | 모노레포(monorepo)에서 공유 라이브러리 모듈 만든다. 여러 앱이 같이 쓰는 코드 모듈.                                                                                                                |
+| **module**        | mo          | 모듈을 만든다. 컨트롤러, 서비스 등을 묶어 기능 단위로 관리하는 Nest의 기본 단위.                                                                                                                  |
+| **pipe**          | pi          | 파이프를 만든다. 요청 데이터 유효성 검사(validation)나 타입 변환 처리 담당.                                                                                                                       |
+| **provider**      | pr          | 프로바이더를 만든다. 주로 서비스나 리포지토리처럼 DI 컨테이너에 주입되는 객체. Spring으로 치면 Component 개념                                                                                     |
+| **resolver**      | r           | GraphQL 리졸버를 만든다. GraphQL 쿼리/뮤테이션을 처리하는 역할.                                                                                                                                   |
+| **resource**      | res         | 도메인에 대한 컨트롤러, 서비스, DTO, 엔티티, 리포지토리를 세트로 자동 생성.                                                                                                                       |
+| **service**       | s           | 서비스 레이어를 만든다. 비즈니스 로직을 담당하며 컨트롤러와 분리.                                                                                                                                 |
+| **sub-app**       | app         | 모노레포(monorepo)에서 서브 애플리케이션을 만든다. 멀티 앱 구조에서 사용.                                                                                                                         |
+| **middleware**    | mi          | 라우터에 도달하기 전에 동작하는 모듈을 만든다. 요청과 응답 객체(req, res)를 직접 다룸. (요청/응답 스트림 레벨 (Express 기반) - 요청을 컨트롤러로 보내기 전에 실행됨 → Spring으로 치면 Filter 개념 |
+| **guard**         | gu          | 가드를 만든다. 요청이 컨트롤러에 도달하기 전에 인증·인가 로직 실행.                                                                                                                               |
+| **interceptor**   | itc         | 컨트롤러 실행 전/후를 가로채서 동작하는 인터셉터를 만든다. NestJS 핸들러/리턴값 레벨 - Spring으로 치면 인터셉터와 동일                                                                            |
+| **filter**        | f           | 예외 필터를 만든다. 에러를 잡아 응답을 통일된 형식으로 변환하는 역할. Spring의 Filter와 헷갈릴 수 있지만 이건 ExceptionHandler 개념                                                               |
+
 ## Project setup
 
 ```bash
