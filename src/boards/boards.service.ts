@@ -1,27 +1,52 @@
 import { Injectable } from '@nestjs/common';
-import { Board } from './board.model';
-import { v4 as uuidv4 } from 'uuid';
-import { CreateBoardDto } from './create-board.dto';
+import { BoardCreateRequestDto } from './dto/boards-create-request.dto';
+import { PrismaRepository } from 'prisma/prisma.repository';
+
+import { Board } from '@prisma/client';
+import { BoardsUpdateRequestDto } from './dto/boards-update-request.dto';
 
 @Injectable()
 export class BoardsService {
-  private boards: Board[] = [];
+  constructor(private prismaRepository: PrismaRepository) {}
 
-  getAllBoards(): Board[] {
-    return this.boards;
+  async getAllBoards(): Promise<Board[]> {
+    return this.prismaRepository.board.findMany();
   }
 
-  createBoard(createBoardDto: CreateBoardDto): Board {
-    const board: Board = {
-      id: uuidv4(),
-      title: createBoardDto.title,
-      description: createBoardDto.description,
-      status: createBoardDto.status,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+  async createBoard(createBoardDto: BoardCreateRequestDto): Promise<Board> {
+    return this.prismaRepository.board.create({
+      data: {
+        title: createBoardDto.title,
+        description: createBoardDto.description,
+        status: createBoardDto.status,
+      },
+    });
+  }
 
-    this.boards.push(board);
-    return board;
+  async getById(id: string): Promise<Board> {
+    return this.prismaRepository.board.findUniqueOrThrow({
+      where: {
+        id,
+      },
+    });
+  }
+
+  async updateById(id: string, updateBoardDto: BoardsUpdateRequestDto) {
+    return this.prismaRepository.board.update({
+      where: {
+        id,
+      },
+      data: {
+        status: updateBoardDto.status,
+      },
+    });
+  }
+
+  async deleteById(id: string): Promise<void> {
+    await this.prismaRepository.board.delete({
+      where: {
+        id,
+      },
+    });
   }
 }

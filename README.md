@@ -50,7 +50,7 @@
 
 ## Nest CLI commands
 
-📑 공식문서 : https://docs.nestjs.com/cli/usages
+📑 공식 문서 : https://docs.nestjs.com/cli/usages
 
 > - nest new|n → 프로젝트 생성
 > - nest build → 빌드
@@ -135,6 +135,86 @@ nest add @nestjs/typeorm
 | **guard**         | gu          | 가드를 만든다. 요청이 컨트롤러에 도달하기 전에 인증·인가 로직 실행.                                                                                                                               |
 | **interceptor**   | itc         | 컨트롤러 실행 전/후를 가로채서 동작하는 인터셉터를 만든다. NestJS 핸들러/리턴값 레벨 - Spring으로 치면 인터셉터와 동일                                                                            |
 | **filter**        | f           | 예외 필터를 만든다. 에러를 잡아 응답을 통일된 형식으로 변환하는 역할. Spring의 Filter와 헷갈릴 수 있지만 이건 ExceptionHandler 개념                                                               |
+
+### 🔄 NestJS의 실행 순서
+
+미들웨어 → 가드 → 인터셉터(before) → 파이프 → 컨트롤러 → 인터셉터(after) → 필터(예외 시)
+
+<br>
+
+### 🔍 NestJS ValidationPipe
+
+📑 ValidationPipe 공식 문서 : https://github.com/typestack/class-validator?tab=readme-ov-file#validation-decorators
+
+#### 커스텀 ValidationPipe 사용
+
+```ts
+// 파이프를 직접 정의할 때 구현
+export class CustomValidationPipe implements PipeTransform {
+  // value는 실제 값, metadata는 값의 출처와 기대 타입 정보
+  transform(value: any, metadata: ArgumentMetadata) {
+    console.log('value:', value);
+    console.log('metadata:', metadata);
+    if (value !== 'PUBLIC' && value !== 'PRIVATE') {
+      throw new BadRequestException(`${value} is not valid status`);
+    }
+    return value;
+  }
+}
+
+// 요청 EX
+PATCH /boards/123/status
+{ "status": "PUBLIC" }
+
+// 로그 EX
+value: "123"
+metadata: { type: 'param', metatype: String, data: 'id' }
+
+value: { status: 'PUBLIC' }
+metadata: { type: 'body', metatype: UpdateBoardStatusDto, data: undefined }
+```
+
+```ts
+// class-validator + class-transformer 연동이 이미 구현된 Nest 기본 파이프를 상속.
+// 필요한 부분만 오버라이드해서 커스터마이징.
+export class CustomValidationPipe extends ValidationPipe {
+  constructor() {
+    super({ whitelist: true, forbidNonWhitelisted: true });
+  }
+}
+```
+
+#### ValidationPipe 적용하기
+
+데코레이터를 선언한다고 validation이 적용되는 것이 아님.
+적용하기 위해서는 아래 2가지 방법이 있음.
+
+1. main.ts 파일에 `app.useGlobalPipes(new ValidationPipe());` 코드를 추가 (글로벌 적용)
+
+```ts
+app.useGlobalPipes(
+  new ValidationPipe({
+    whitelist: true, // DTO에 정의되지 않은 속성은 자동 제거.
+    transform: true, // whitelist랑 같이 써야 의미 있음. 정의되지 않은 속성이 오면 제거하는 대신 400 에러 발생시킴.
+    forbidNonWhitelisted: true, // 요청 JSON을 DTO 클래스 타입으로 변환.
+    validateCustomDecorators: true, // 직접 만든 커스텀 데코레이터에도 class-validator 검증을 적용. 안 쓰면 커스텀 데코레이터 통해 들어오는 값은 검증 무시될 수 있음.
+  }),
+);
+```
+
+2. 클래스 or 메서드 레벨에 `@UsePipes(new ValidationPipe())` 데코레이터를 선언 (해당 scope에만 적용)
+
+```ts
+@Controller('boards')
+@UsePipes(new ValidationPipe({ whitelist: true })) // 이 컨트롤러 전부 적용
+export class BoardsController {
+  @Post()
+  @UsePipes(new ValidationPipe({ forbidNonWhitelisted: true })) // 이 핸들러만 따로 규칙
+  createBoard(@Body() dto: CreateBoardDto) { ... }
+}
+```
+
+<br>
 
 ## Project setup
 

@@ -1,0 +1,39 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+// Prisma 클라이언트를 어떤 방식으로 생성할 것인지 설정하기 위해 사용 (사용할 언어(ex: TypeScript)와 필요한 클라이언트 옵션을 지정)
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 데이터베이스에 대해 정의하기 위해 사용 (데이터베이스의 종류와 연결 정보를 설정)
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 모델 정의 (DDL 정의)
+model Board {
+  id          String       @id @default(uuid())
+  title       String
+  description String
+  status      BoardsStatus @default(PUBLIC)
+
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt      @map("updated_at")
+
+  @@map("boards")
+}
+
+enum BoardsStatus {
+  PUBLIC
+  PRIVATE
+}
+
+
+// 실행 가이드 
+// npx prisma migrate dev --name init   # 스키마 변경 시 실행 : 모델 → SQL → DB 반영
+// npx prisma generate                  # schema.prisma의 설정을 변경 했을 시 실행 : Client 코드 생성

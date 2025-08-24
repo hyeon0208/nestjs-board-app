@@ -1,6 +1,13 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from '@nestjs/common';
 import { BoardsService } from './boards.service';
-import { Board, BoardsStatus } from './board.model';
 import {
   ApiBody,
   ApiCreatedResponse,
@@ -8,7 +15,10 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { CreateBoardDto } from './create-board.dto';
+import { BoardCreateRequestDto } from './dto/boards-create-request.dto';
+import { BoardsStatus } from '@prisma/client';
+import { BoardResponseDto } from './dto/boards-response.dto';
+import { BoardsUpdateRequestDto } from './dto/boards-update-request.dto';
 
 @ApiTags('boards')
 @Controller('boards')
@@ -17,17 +27,45 @@ export class BoardsController {
 
   @Get()
   @ApiOperation({ summary: '모든 게시글 조회' })
-  @ApiOkResponse({ type: Board, isArray: true })
-  getAllBoards(): Board[] {
-    return this.boardsService.getAllBoards();
+  @ApiOkResponse({ type: BoardResponseDto, isArray: true })
+  async getAllBoards(): Promise<BoardResponseDto[]> {
+    return await this.boardsService.getAllBoards();
   }
 
   @Post()
   @ApiOperation({ summary: '게시글 생성' })
-  @ApiBody({ type: CreateBoardDto })
-  @ApiCreatedResponse({ type: Board })
-  createBoard(@Body() createBoardDto: CreateBoardDto): Board {
-    createBoardDto.status ??= BoardsStatus.PUBLIC;
-    return this.boardsService.createBoard(createBoardDto);
+  @ApiBody({ type: BoardCreateRequestDto })
+  @ApiCreatedResponse({ type: BoardResponseDto })
+  async createBoard(
+    @Body() createBoardDto: BoardCreateRequestDto,
+  ): Promise<BoardResponseDto> {
+    createBoardDto.status =
+      createBoardDto.status ?? (BoardsStatus.PUBLIC as BoardsStatus);
+    return await this.boardsService.createBoard(createBoardDto);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: '게시글 조회' })
+  @ApiOkResponse({ type: BoardResponseDto })
+  async getBoard(@Param('id') id: string): Promise<BoardResponseDto> {
+    return await this.boardsService.getById(id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: '게시글 수정' })
+  @ApiBody({ type: BoardsUpdateRequestDto })
+  @ApiOkResponse({ type: BoardResponseDto })
+  async updateBoard(
+    @Param('id') id: string,
+    @Body() updateBoardDto: BoardsUpdateRequestDto,
+  ): Promise<BoardResponseDto> {
+    return await this.boardsService.updateById(id, updateBoardDto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: '게시글 삭제' })
+  @ApiOkResponse({ type: BoardResponseDto })
+  async deleteBoard(@Param('id') id: string): Promise<void> {
+    return await this.boardsService.deleteById(id);
   }
 }
