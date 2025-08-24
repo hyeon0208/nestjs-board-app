@@ -6,9 +6,11 @@ import {
   Patch,
   Param,
   Delete,
+  UseGuards,
 } from '@nestjs/common';
 import { BoardsService } from './boards.service';
 import {
+  ApiBearerAuth,
   ApiBody,
   ApiCreatedResponse,
   ApiOkResponse,
@@ -19,8 +21,11 @@ import { BoardCreateRequestDto } from './dto/boards-create-request.dto';
 import { BoardsStatus } from '@prisma/client';
 import { BoardResponseDto } from './dto/boards-response.dto';
 import { BoardsUpdateRequestDto } from './dto/boards-update-request.dto';
+import { AuthGuard } from '@nestjs/passport';
 
 @ApiTags('boards')
+@ApiBearerAuth()
+@UseGuards(AuthGuard())
 @Controller('boards')
 export class BoardsController {
   constructor(private readonly boardsService: BoardsService) {}

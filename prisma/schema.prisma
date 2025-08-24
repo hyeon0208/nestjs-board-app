@@ -25,12 +25,22 @@ model Board {
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt      @map("updated_at")
 
-  @@map("boards")
+  @@map("board")
 }
 
 enum BoardsStatus {
   PUBLIC
   PRIVATE
+}
+
+model User {
+  id String @id @default(uuid())
+  name String @unique 
+  password String
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt      @map("updated_at")
+
+  @@map("user")
 }
 
 

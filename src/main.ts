@@ -19,10 +19,20 @@ async function bootstrap() {
     .setTitle('API Docs')
     .setDescription('NestJS Swagger API 문서')
     .setVersion('1.0')
+    .addBearerAuth({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+      in: 'header',
+      name: 'Authorization',
+      description: 'Bearer <JWT>',
+    })
     .build();
 
   const doc = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, doc);
+  SwaggerModule.setup('api', app, doc, {
+    swaggerOptions: { persistAuthorization: true },
+  });
 
   await app.listen(process.env.PORT ?? 3000);
 }
