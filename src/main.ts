@@ -2,11 +2,11 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
-import { TracingLogger } from './shared/trace/tracing-logger.service';
+import { selectLogger } from './shared/trace/logger.select';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
-  app.useLogger(app.get(TracingLogger));
+  app.useLogger(selectLogger(app));
 
   app.useGlobalPipes(
     new ValidationPipe({
