@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   UseGuards,
+  Logger,
 } from '@nestjs/common';
 import { BoardsService } from './boards.service';
 import {
@@ -24,11 +25,26 @@ import { BoardsUpdateRequestDto } from './dto/boards-update-request.dto';
 import { AuthGuard } from '@nestjs/passport';
 
 @ApiTags('boards')
-@ApiBearerAuth()
-@UseGuards(AuthGuard())
+// @ApiBearerAuth()
+// @UseGuards(AuthGuard())
 @Controller('boards')
 export class BoardsController {
+  private readonly logger = new Logger(BoardsController.name);
+
   constructor(private readonly boardsService: BoardsService) {}
+
+  @Get('test')
+  @ApiOperation({ summary: '병렬 로깅 테스트' })
+  @ApiOkResponse()
+  async test() {
+    this.logger.log('controller:in');
+    await Promise.all([
+      this.boardsService.fetchBoards(),
+      this.boardsService.countBoards(),
+      this.boardsService.loadMeta(),
+    ]);
+    this.logger.log('controller:out');
+  }
 
   @Get()
   @ApiOperation({ summary: '모든 게시글 조회' })
