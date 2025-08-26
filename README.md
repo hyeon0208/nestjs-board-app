@@ -216,6 +216,19 @@ export class BoardsController {
 
 <br>
 
+## Execution logging
+
+The project ships with a custom console logger that enriches each line with
+stack traces and JSON metadata for easier filtering in log platforms. Logs are
+emitted in the following format:
+
+```
+[LEVEL] message [file.ts:line] {"key":"value"}
+```
+
+Request and user identifiers are automatically attached when available, and any
+additional metadata can be added programmatically.
+
 ## Project setup
 
 ```bash
