@@ -1,17 +1,19 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from 'src/app.module';
 import { BoardsController } from './boards.controller';
-import { selectLogger } from 'src/shared/trace/logger.select';
+import { TracingConsoleLogger } from 'src/shared/trace/tracing.console-logger';
 
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(AppModule, {
     bufferLogs: true,
   });
 
-  // 환경에 따라 console/json/pino 로거 선택
-  app.useLogger(selectLogger(app));
+  // 커스텀 콘솔 로거 사용
+  app.useLogger(app.get(TracingConsoleLogger));
   const ctrl = app.get(BoardsController);
   await ctrl.test();
   await app.close();
 }
-bootstrap();
+bootstrap().catch((err) => {
+  console.error(err);
+});
