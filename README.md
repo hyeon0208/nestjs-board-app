@@ -216,6 +216,24 @@ export class BoardsController {
 
 <br>
 
+## Execution logging
+
+The project ships with a custom console logger that enriches each line with
+timestamps, stack traces, and JSON metadata for easier filtering in log
+platforms. Logs are emitted in the following format:
+
+```
+[2024-01-01T00:00:00.000Z] [LEVEL] message [Class.method file.ts:line] {"key":"value"}
+```
+
+Request and user identifiers are automatically attached when available, and any
+additional metadata can be added programmatically by passing a JSON object as a
+second argument:
+
+```
+this.logger.log('user created', { userId: 123 });
+```
+
 ## Project setup
 
 ```bash
