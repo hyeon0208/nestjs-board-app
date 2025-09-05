@@ -1,0 +1,57 @@
+setup.template.type: data_stream
+logging.level: info
+
+# ref : https://www.elastic.co/docs/reference/beats/filebeat/filebeat-input-log
+filebeat.inputs:
+  - type: filestream
+    id: docker-logs
+    paths: ['/var/lib/docker/containers/*/*.log']
+    harvester_buffer_size: 16384 # 로그 파일에서 한 번에 읽어오는 버퍼 크기
+    parsers:
+      - multiline:
+          type: pattern
+          pattern: '^\s'
+          negate: false
+          match: after # 매칭된 줄 뒤의 줄들을 이전 이벤트에 붙임. (즉, 패턴 줄은 새 이벤트 시작이고, 그 다음에 나오는 줄들이 공백 등 패턴에 걸리면 앞 이벤트에 합쳐짐)
+          max_lines: 500
+          timeout: 5s
+          skip_newline: true # 줄을 연결할 때 줄 바꿈 문자를 추가하지 않음.
+      - container: {} # sout으로 출력된 실제 앱 로그 메시지는 컨테이너 로그의 "log" 필드 안에 있음 → Filebeat의 message 필드로 승격
+    data_stream.type: logs
+    data_stream.dataset: syncly-scraper
+    data_stream.namespace: default
+
+# ref : https://www.elastic.co/docs/reference/beats/filebeat/configuring-internal-queue#_configuration_options_37
+# Filebeat는 이벤트를 게시하기 전에 내부 큐를 사용하여 저장합니다.
+# 큐는 이벤트를 버퍼링하고 출력에서 ​​사용할 수 있는 배치로 결합하는 역할을 합니다.
+# 출력은 대량 작업을 사용하여 한 번의 트랜잭션으로 여러 이벤트를 전송합니다.
+# 출력에서 ​​bulk_max_size 매개변수를 지원하는 경우, 최대 배치 크기는 bulk_max_size와 flush.min_events 중 작은 값이 됨.
+queue.mem: # 메모리 큐는 모든 이벤트를 메모리에 보관
+  events: 4096 # 메모리 큐에 최대 4096개의 이벤트를 저장.
+  flush.min_events: 512 # 최소 512개의 이벤트가 쌓이면 플러시.
+  flush.timeout: 5s # 5초 동안 이벤트가 쌓이지 않으면 플러시.
+
+# ref : https://www.elastic.co/docs/reference/beats/filebeat/configuring-internal-queue#configuration-internal-queue-disk-reference
+# 디스크 큐는 보류 중인 이벤트를 주 메모리가 아닌 디스크에 저장
+# 이를 통해 Beats는 메모리 큐보다 더 많은 이벤트를 큐에 저장할 수 있으며, Beats 또는 서버가 재시작될 때 이벤트를 저장
+queue.disk: # 데이터 파일을 저장할 디렉터리 경로 path를 지정하지 않으면 기본값 (.)에 저장
+  max_size: 10GB
+
+processors:
+  - add_docker_metadata:
+      host: 'unix:///var/run/docker.sock'
+
+# File 읽기 → harvester → queue.mem → (flush.min_events or flush.timeout) → output buffer → (bulk_max_size or flush_interval) → Elasticsearch
+
+output.elasticsearch:
+  hosts: ['${ELASTICSEARCH_HOSTS}']
+  username: '${ELASTICSEARCH_USERNAME}'
+  password: '${ELASTICSEARCH_PASSWORD}'
+  bulk_max_size: 512 # 배치 단위 = min(bulk_max_size, flush.min_events)
+  flush_interval: 1s # 1초마다 전송 (batch가 덜 차도 보냄)
+
+# xpack.monitoring.enabled: true
+# xpack.monitoring.elasticsearch:
+#   hosts: ['http://elasticsearch:9200']
+#   username: ${ELASTICSEARCH_USERNAME}
+#   password: ${ELASTICSEARCH_PASSWORD}

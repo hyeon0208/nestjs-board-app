@@ -1,7 +1,55 @@
+# https://docs.docker.com/reference/compose-file/extension/
+x-logging: &default-logging
+  driver: 'json-file'
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
+  filebeat:
+    image: docker.elastic.co/beats/filebeat-wolfi:9.1.2
+    user: root # Filebeat가 로그 파일 접근 권한을 갖도록 root 사용자로 실행.
+    # 권한 관련 검사를 무시. (마운트된 파일 권한이 root일 때 흔히 필요)
+    # 실행 시점에 환경 오버라이드로 Elasticsearch 출력 경로 지정.
+    command: >
+      filebeat -e --strict.perms=false
+    volumes:
+      - ./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro # 로컬의 filebeat.docker.yml을 컨테이너 내부의 Filebeat 설정 파일 위치로 바운드 마운팅 (:ro → read-only)
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro # 호스트에서 도커 컨테이너 로그가 저장되는 경로를 컨테이너 안에 마운트. (ilebeat가 다른 컨테이너의 로그를 읽을 수 있게 함.)
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Docker 소켓을 연결하여 Filebeat가 컨테이너 메타데이터(컨테이너 이름, 라벨 등)를 가져올 수 있음.
+      - ./configs:/usr/share/filebeat/configs:ro # 리로드할 yml들이 여기 들어감
+      - registry:/usr/share/filebeat/data:rw # Filebeat의 상태(어디까지 읽었는지 offset, registry 파일 등)를 저장할 볼륨. (:rw → 읽기/쓰기 가능.) => 이걸 안 두면 컨테이너 재시작 시 로그 수집 위치를 잃어버림.
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: elastic
+      ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD}
+    logging: *default-logging
+    networks:
+      - elk
+
+  mongo:
+    image: mongo
+    container_name: local-mongo
+    ports: ['27017:27017']
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpw
+      MONGO_INITDB_DATABASE: app
+    volumes:
+      - mongo_data:/data/db
+
+  worker1:
+    build: .
+    logging: *default-logging
+    ports:
+      - '3000:3000'
+    depends_on:
+      - postgres
+
   postgres:
     image: postgres
     container_name: postgres
+    logging: *default-logging
     env_file:
       - .env
     restart: unless-stopped
@@ -10,4 +58,13 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - '${POSTGRES_PORT}:5432'
+      - '5432:5432'
+
+volumes:
+  registry:
+  mongo_data:
+
+networks:
+  elk:
+    external: true
+    name: docker-elk_elk
