@@ -4,37 +4,35 @@ import { PrismaRepository } from 'prisma/prisma.repository';
 
 import { Board } from '@prisma/client';
 import { BoardsUpdateRequestDto } from './dto/boards-update-request.dto';
-import { Logger } from '@nestjs/common';
+import { logger } from 'src/logging/syncly.logger';
 
 @Injectable()
 export class BoardsService {
-  private readonly logger = new Logger(BoardsService.name);
-
   constructor(private prismaRepository: PrismaRepository) {}
 
   async fetchBoards() {
-    this.logger.log('fetchBoards:start');
+    logger.info('fetchBoards:start');
     await new Promise((resolve) => setTimeout(resolve, 120));
-    this.logger.log('fetchBoards:done');
+    logger.info('fetchBoards:done');
     return ['board1'];
   }
 
   async countBoards() {
-    this.logger.log('countBoards:start');
+    logger.info('countBoards:start');
     await new Promise((resolve) => setTimeout(resolve, 80));
-    this.logger.log('countBoards:done');
+    logger.info('countBoards:done');
     return 1;
   }
 
   async loadMeta() {
-    this.logger.log('loadMeta:start');
+    logger.info('loadMeta:start');
     await new Promise((resolve) => setTimeout(resolve, 60));
-    this.logger.log('loadMeta:done');
+    logger.info('loadMeta:done');
     return { v: 1 };
   }
 
   async getAllBoards(): Promise<Board[]> {
-    this.logger.log('service getAllBoards');
+    logger.info('service getAllBoards');
     return this.prismaRepository.board.findMany();
   }
 

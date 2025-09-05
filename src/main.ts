@@ -2,11 +2,14 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
-import { TracingConsoleLogger } from './shared/trace/tracing.console-logger';
+import mongoose from 'mongoose';
+import { logger } from './logging/syncly.logger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
-  app.useLogger(app.get(TracingConsoleLogger));
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+  });
+  app.useLogger(logger); // nest 자체 로거를 교체
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -17,6 +20,9 @@ async function bootstrap() {
     }),
   );
 
+  mongoose.set('toJSON', { virtuals: true });
+  mongoose.set('toObject', { virtuals: true });
+  // mongoose.plugin(casePlugin);
   const config = new DocumentBuilder()
     .setTitle('API Docs')
     .setDescription('NestJS Swagger API 문서')
