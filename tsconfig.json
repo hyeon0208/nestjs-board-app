@@ -21,7 +21,7 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
-    "types": ["node", "@prisma/client"]
+    "types": ["node", "@prisma/client", "jest"]
   },
-  "include": ["src", "prisma"]
+  "include": ["src", "prisma", "**/*.ts"]
 }

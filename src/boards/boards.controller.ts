@@ -7,7 +7,6 @@ import {
   Param,
   Delete,
   UseGuards,
-  Logger,
 } from '@nestjs/common';
 import { BoardsService } from './boards.service';
 import {
@@ -23,27 +22,34 @@ import { BoardsStatus } from '@prisma/client';
 import { BoardResponseDto } from './dto/boards-response.dto';
 import { BoardsUpdateRequestDto } from './dto/boards-update-request.dto';
 import { AuthGuard } from '@nestjs/passport';
+import { error } from 'console';
+import { logger } from 'src/logging/syncly.logger';
 
 @ApiTags('boards')
 // @ApiBearerAuth()
 // @UseGuards(AuthGuard())
 @Controller('boards')
 export class BoardsController {
-  private readonly logger = new Logger(BoardsController.name);
-
   constructor(private readonly boardsService: BoardsService) {}
 
   @Get('test')
   @ApiOperation({ summary: '병렬 로깅 테스트' })
   @ApiOkResponse()
   async test() {
-    this.logger.log('controller:in');
+    logger.info('controller:in', { workflow: 'dfa' });
+
+    try {
+      throw new Error('test error');
+    } catch (error) {
+      logger.error('controller:in', error);
+    }
+
     await Promise.all([
       this.boardsService.fetchBoards(),
       this.boardsService.countBoards(),
       this.boardsService.loadMeta(),
     ]);
-    this.logger.log('controller:out');
+    logger.info('controller:out');
   }
 
   @Get()
