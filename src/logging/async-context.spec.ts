@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import { Ctx } from './async-context.js';
-import { asyncContext } from './async-context.js';
+import { Ctx } from './async-context';
+import { asyncContext } from './async-context';
 
 describe('asyncContext', () => {
   beforeEach(() => {
