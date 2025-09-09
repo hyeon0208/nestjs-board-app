@@ -1,72 +1,44 @@
 import pino, { LoggerOptions } from 'pino';
 import { asyncContext } from './async-context';
+import { LogLevel } from './syncly.logger';
 
 export function buildPinoLoggerFormatOptions(): LoggerOptions {
   return {
-    level: process.env.LOG_LEVEL ?? 'info',
+    level: process.env.LOG_LEVEL ?? LogLevel.INFO,
     base: { workerId: process.pid },
     timestamp: pino.stdTimeFunctions.isoTime,
     mixin: () => ({
       ...asyncContext.getAll(),
       ...getLocationInfo(),
     }),
-    messageKey: 'message',
+    // messageKey = “로그 메시지가 저장될 JSON 키 이름”
+    // 기본 "msg", 보통 "message"로 바꿔서 사람이 읽기 좋게 씀
+    // json 형식으로 출력 시킬 때 msg가 아닌 message로 출력되길 의도했는데
+    // messageKey를 사용하면 항상 message가 마지막 순서로 나오게 됨. 순서는 강제할 수 없다 → 순서를 제어하려면 messageKey를 안쓰는게 나음.
+    // messageKey: 'message',
     errorKey: 'error',
     formatters: {
       level: (label) => ({ level: label }),
     },
     hooks: {
+      // 로그 호출 시점에 인자 가공
+      // pino의 로거 인자는 obj, msg 라서 logger.info('메시지', { foo: 1, bar: 2})로 출력하면 2번쨰 인자는 출력되지 않음. 그래서 기존 로거 출력 방식으로 맞추기 위해 순서 swap
       logMethod(args, method) {
-        const { msg, obj } = normalizeLogArgs(args as unknown[]);
-        (method as any).apply(this, obj ? [obj, msg] : [msg]);
+        const [firstArg, secondArg, ...rest] = args;
+        if (
+          typeof firstArg === 'string' &&
+          secondArg &&
+          typeof secondArg === 'object'
+        ) {
+          return (method as any).apply(this, [secondArg, firstArg, ...rest]);
+        }
+        return (method as any).apply(this, args);
       },
     },
     serializers: {
       error: pino.stdSerializers.err,
     },
   };
-}
-
-function normalizeLogArgs(args: unknown[]) {
-  const [first, ...rest] = args;
-  const msg = typeof first === 'string' ? first : JSON.stringify(first);
-  const meta: Record<string, unknown> = {};
-
-  for (const cur of rest) {
-    if (cur && typeof cur === 'object') {
-      Object.assign(meta, normalizePlain(cur));
-    } else if (['string', 'number', 'boolean'].includes(typeof cur)) {
-      if (!meta.extra) {
-        meta.extra = [];
-      }
-      (meta.extra as unknown[]).push(cur);
-    }
-  }
-
-  return Object.keys(meta).length ? { msg, obj: meta } : { msg };
-}
-
-function normalizePlain(input: unknown, visited = new WeakSet()): unknown {
-  if (input instanceof Error) {
-    return {
-      name: input.name,
-      message: input.message,
-      stack: input.stack,
-    };
-  }
-  if (Array.isArray(input)) {
-    return input.map((item) => normalizePlain(item, visited));
-  }
-  if (input && typeof input === 'object') {
-    if (visited.has(input)) {
-      return { circular: true };
-    }
-    visited.add(input);
-    return Object.fromEntries(
-      Object.entries(input).map(([k, v]) => [k, normalizePlain(v, visited)]),
-    );
-  }
-  return input;
 }
 
 // 현재 호출한 함수의 "호출자 정보(메서드명, 파일, 라인 번호)"를 뽑아내는 유틸
