@@ -1,4 +1,4 @@
-name: 📊 Deploy Production
+name: 📊 prod-cd
 
 on:
   workflow_call:
@@ -46,5 +46,4 @@ jobs:
     - name: 운영환경 배포 시뮬레이션
       run: |
         echo "🚀 운영 서버 배포 중..."
-        sleep 3
         echo "✅ 운영환경 배포 완료!"

@@ -1,4 +1,4 @@
-name: 🔧 Deploy Development
+name: 🔧 dev-cd
 
 on:
   workflow_call:

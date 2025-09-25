@@ -12,7 +12,10 @@ jobs:
   call-dev-workflow:
     if: inputs.target_environment == 'dev'
     uses: ./.github/workflows/deploy-dev.yml
+    secrets: inherit
     
   call-prod-workflow:
     if: inputs.target_environment == 'prod' 
     uses: ./.github/workflows/deploy-prod.yml
+    secrets: inherit
+    
