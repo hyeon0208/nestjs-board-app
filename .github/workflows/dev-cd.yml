@@ -11,29 +11,25 @@ on:
         options:
         - dev
         - prod
-      confirm_prod:
-        description: 'Type "CONFIRM" to deploy to production'
+      prod_confirmation:
+        description: 'I understand this will deploy to PRODUCTION'
         required: false
-        type: string
+        default: false
+        type: boolean
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     steps:
+    - name: Validate branch
+      run: echo "✅ Running on main branch"
+    
     - name: Validate production deployment
       if: ${{ github.event.inputs.environment == 'prod' }}
       run: |
-        if [ "${{ github.event.inputs.confirm_prod }}" != "CONFIRM" ]; then
-          echo "Production deployment requires confirmation"
-          exit 1
-        fijobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Validate production deployment
-      if: ${{ github.event.inputs.environment == 'prod' }}
-      run: |
-        if [ "${{ github.event.inputs.confirm_prod }}" != "CONFIRM" ]; then
-          echo "Production deployment requires confirmation"
+        if [ "${{ github.event.inputs.prod_confirmation }}" != "true" ]; then
+          echo "❌ Production deployment requires confirmation checkbox"
           exit 1
         fi
+        echo "✅ Production deployment confirmed"
