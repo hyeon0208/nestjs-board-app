@@ -7,33 +7,39 @@ on:
         description: '배포 환경 선택'
         required: true
         type: environment
-      # prod_confirmation 필드 제거 - Environment 보호 규칙으로 대체
 
 jobs:
   deploy:
     name: 환경별 배포
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    environment: ${{ inputs.target_environment }}  # 선택된 환경 직접 적용
+    environment: ${{ inputs.target_environment }}
     steps:
     - name: 환경 정보 출력
       run: |
         echo "🚀 배포 환경: ${{ inputs.target_environment }}"
-        echo "📍 현재 브랜치: ${{ github.ref_name }}"
         
-    - name: 환경별 배포 로직
+    - name: Environment Secrets 확인
       run: |
-        case "${{ inputs.target_environment }}" in
-          "development"|"dev")
-            echo "🔧 개발환경 배포를 시작합니다"
-            # 개발환경 배포 스크립트
-            ;;
-          "production"|"prod")
-            echo "⚠️  운영환경 배포를 시작합니다"
-            # 운영환경 배포 스크립트
-            ;;
-          *)
-            echo "📦 ${{ inputs.target_environment }} 환경에 배포합니다"
-            # 기타 환경 배포 스크립트
-            ;;
-        esac
+        echo "=== Environment Secrets 확인 ==="
+        if [ -n "${{ secrets.DATABASE_URL }}" ]; then
+          echo "✅ DATABASE_URL: 설정됨"
+        else
+          echo "❌ DATABASE_URL: 설정되지 않음"
+        fi
+        
+        if [ -n "${{ secrets.API_KEY }}" ]; then
+          echo "✅ API_KEY: 설정됨"
+        else
+          echo "❌ API_KEY: 설정되지 않음"
+        fi
+        
+    - name: Environment Variables 확인  
+      run: |
+        echo "=== Environment Variables 확인 ==="
+        echo "LOG_LEVEL: ${{ vars.LOG_LEVEL }}"
+        echo "PORT: ${{ vars.PORT }}"
+        
+    - name: 환경별 배포
+      run: |
+        echo "=== ${{ inputs.target_environment }} 환경 배포 시작 ==="
+        # inputs.target_environment 직접 사용!
