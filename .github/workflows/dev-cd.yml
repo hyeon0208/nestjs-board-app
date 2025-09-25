@@ -1,0 +1,39 @@
+name: Deploy Application
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Select deployment environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - prod
+      confirm_prod:
+        description: 'Type "CONFIRM" to deploy to production'
+        required: false
+        type: string
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate production deployment
+      if: ${{ github.event.inputs.environment == 'prod' }}
+      run: |
+        if [ "${{ github.event.inputs.confirm_prod }}" != "CONFIRM" ]; then
+          echo "Production deployment requires confirmation"
+          exit 1
+        fijobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate production deployment
+      if: ${{ github.event.inputs.environment == 'prod' }}
+      run: |
+        if [ "${{ github.event.inputs.confirm_prod }}" != "CONFIRM" ]; then
+          echo "Production deployment requires confirmation"
+          exit 1
+        fi
