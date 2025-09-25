@@ -18,7 +18,7 @@ on:
         type: boolean
 
 jobs:
-  validate:
+  validate-prod-deploy:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
@@ -26,7 +26,7 @@ jobs:
       if: ${{ github.event.inputs.environment == 'prod' }}
       run: |
         if [ "${{ github.event.inputs.prod_confirmation }}" != "true" ]; then
-          echo "❌ Production deployment requires confirmation checkbox"
+          echo "❌ Production 배포 시 checkbox를 꼭 체크해주세요."
           exit 1
         fi
-        echo "✅ Production deployment confirmed"
+        echo "✅ Production 배포 체크 확인됨."
