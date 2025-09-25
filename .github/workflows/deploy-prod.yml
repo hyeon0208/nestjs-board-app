@@ -1,0 +1,45 @@
+name: ⚠️ Deploy Production
+
+on:
+  workflow_call:
+
+jobs:
+  deploy:
+    name: 운영환경 배포
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+    - name: 환경 정보 출력
+      run: |
+        echo "⚠️ 운영환경 배포 시작"
+        echo "현재 시간: $(date)"
+        
+    - name: Environment Secrets 테스트
+      run: |
+        echo "=== Prod Environment Secrets ==="
+        if [ -n "$DATABASE_URL" ]; then
+          echo "✅ DATABASE_URL: 설정됨 (길이: ${#DATABASE_URL}자)"
+        else
+          echo "❌ DATABASE_URL: 설정되지 않음"
+        fi
+        
+        if [ -n "$API_KEY" ]; then
+          echo "✅ API_KEY: 설정됨 (길이: ${#API_KEY}자)"
+        else
+          echo "❌ API_KEY: 설정되지 않음"
+        fi
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        API_KEY: ${{ secrets.API_KEY }}
+        
+    - name: Environment Variables 테스트
+      run: |
+        echo "=== Prod Environment Variables ==="
+        echo "LOG_LEVEL: ${{ vars.LOG_LEVEL }}"
+        echo "PORT: ${{ vars.PORT }}"
+        
+    - name: 운영환경 배포 시뮬레이션
+      run: |
+        echo "🚀 운영 서버 배포 중..."
+        sleep 3
+        echo "✅ 운영환경 배포 완료!"
