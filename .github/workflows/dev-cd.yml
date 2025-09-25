@@ -22,9 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
-    - name: Validate branch
-      run: echo "✅ Running on main branch"
-    
     - name: Validate production deployment
       if: ${{ github.event.inputs.environment == 'prod' }}
       run: |
