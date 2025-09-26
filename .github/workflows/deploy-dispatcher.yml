@@ -4,18 +4,45 @@ on:
   workflow_dispatch:
     inputs:
       target_environment:
-        description: '배포 환경 선택'
+        description: 'Target Environment'
         required: true
-        type: environment
+        type: choice
+        options: ['dev', 'prod']
+      rollback_version:
+        description: 'Rollback Version (optional)'
+        required: false
 
 jobs:
-  call-dev-workflow:
-    if: inputs.target_environment == 'dev'
-    uses: ./.github/workflows/deploy-dev.yml
+  deploy:
+    uses: ./.github/workflows/deploy-common.yml
+    with:
+      environment: ${{ inputs.target_environment }}
+      rollback_version: ${{ inputs.rollback_version }}
     secrets: inherit
-    
-  call-prod-workflow:
-    if: inputs.target_environment == 'prod' 
-    uses: ./.github/workflows/deploy-prod.yml
-    secrets: inherit
-    
+
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       target_environment:
+#         description: '배포 환경 선택'
+#         required: true
+#         type: environment
+#       rollback_version:
+#         description: '특정 롤백이 필요하다면 입력해주세요. (e.g., v2024.09.26-a1b2c3d)'
+#         required: false
+
+# jobs:
+#   call-dev-workflow:
+#     if: inputs.target_environment == 'dev'
+#     uses: ./.github/workflows/deploy-dev.yml
+#     with:
+#       rollback_version: ${{ inputs.rollback_version }}
+#     secrets: inherit
+
+#   call-prod-workflow:
+#     if: inputs.target_environment == 'prod'
+#     uses: ./.github/workflows/deploy-prod.yml
+#     with:
+#       rollback_version: ${{ inputs.rollback_version }}
+#     secrets: inherit
+

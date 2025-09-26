@@ -1,0 +1,163 @@
+name: 🚀 Deploy Application
+
+# 단일 배포를 위한 스크립트
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Target Environment'
+        required: true
+        type: choice
+        options: ['dev', 'prod']
+        default: 'dev'
+      rollback_version:
+        description: 'Rollback Version (optional, e.g., v2024.09.27-a1b2c3d)'
+        required: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: syncly-crawler-v2-base
+  DEPLOY_PATH: ~/syncly-crawler
+
+jobs:
+  # 환경 결정
+  determine-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      is_rollback: ${{ steps.env.outputs.is_rollback }}
+    steps:
+    - name: Determine target environment
+      id: env
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # 수동 실행: 사용자가 선택한 환경
+          echo "environment=${{ inputs.target_environment }}" >> $GITHUB_OUTPUT
+          if [ -n "${{ inputs.rollback_version }}" ]; then
+            echo "is_rollback=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_rollback=false" >> $GITHUB_OUTPUT
+          fi
+        fi
+
+  # 프로덕션 승인 (필요시)
+  approval:
+    needs: [determine-environment]
+    if: needs.determine-environment.outputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: 
+      name: prod-approval
+      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+    - name: Wait for production approval
+      run: |
+        echo "🔒 Production deployment requires approval"
+        echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+        echo "Rollback: ${{ needs.determine-environment.outputs.is_rollback }}"
+
+  # 메인 배포
+  deploy:
+    needs: [determine-environment, approval]
+    if: always() && needs.determine-environment.result == 'success' && (needs.determine-environment.outputs.environment != 'prod' || needs.approval.result == 'success')
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Generate version
+      id: version
+      run: |
+        if [ "${{ needs.determine-environment.outputs.is_rollback }}" = "true" ]; then
+          echo "version=${{ inputs.rollback_version }}" >> $GITHUB_OUTPUT
+          echo "mode=rollback" >> $GITHUB_OUTPUT
+          echo "🔄 [${{ needs.determine-environment.outputs.environment }}] Rollback to: ${{ inputs.rollback_version }}"
+        else
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          TIMESTAMP=$(date +%Y.%m.%d)
+          SUFFIX=${{ needs.determine-environment.outputs.environment == 'dev' && '-dev' || '' }}
+          VERSION="v${TIMESTAMP}-${SHORT_SHA}${SUFFIX}"
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "mode=deploy" >> $GITHUB_OUTPUT
+          echo "🚀 [${{ needs.determine-environment.outputs.environment }}] New version: $VERSION"
+        fi
+
+    - name: Configure AWS credentials
+      if: steps.version.outputs.mode == 'deploy'
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Build and push to ECR
+      if: steps.version.outputs.mode == 'deploy'
+      run: |
+        aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+        
+        docker build \
+          --label "version=${{ steps.version.outputs.version }}" \
+          --label "environment=${{ needs.determine-environment.outputs.environment }}" \
+          --label "commit.sha=${{ github.sha }}" \
+          --label "build.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          -t ${{ secrets.ECR_REGISTRY }}/$ECR_REPOSITORY:${{ steps.version.outputs.version }} .
+        
+        docker push ${{ secrets.ECR_REGISTRY }}/$ECR_REPOSITORY:${{ steps.version.outputs.version }}
+        
+        echo "✅ Image pushed: ${{ steps.version.outputs.version }}"
+
+    - name: Upload files to EC2
+      uses: appleboy/scp-action@v1
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        source: "scripts/*,docker-compose.yml"
+        target: "${{ env.DEPLOY_PATH }}/"
+        overwrite: true
+
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1
+      env:
+        DEPLOY_MODE: ${{ steps.version.outputs.mode }}
+        TARGET_VERSION: ${{ steps.version.outputs.version }}
+        ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+        ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+        CW_LOG_GROUP: ${{ secrets.CW_LOG_GROUP }}
+        CW_STREAM_PREFIX: ${{ secrets.CW_STREAM_PREFIX }}
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        REDIS_URL: ${{ secrets.REDIS_URL }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        API_KEY: ${{ secrets.API_KEY }}
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        envs: DEPLOY_MODE,TARGET_VERSION,ENVIRONMENT,ECR_REGISTRY,ECR_REPOSITORY,CW_LOG_GROUP,CW_STREAM_PREFIX,DATABASE_URL,REDIS_URL,JWT_SECRET,API_KEY
+        script: |
+          cd ${{ env.DEPLOY_PATH }}
+          chmod +x scripts/*.sh
+          
+          echo "🎯 Deploying to: $ENVIRONMENT"
+          echo "📦 Version: $TARGET_VERSION"
+          echo "🔧 Mode: $DEPLOY_MODE"
+          
+          if [ "$DEPLOY_MODE" = "rollback" ]; then
+            ./scripts/rollback.sh "$TARGET_VERSION"
+          else
+            ./scripts/deploy.sh "$TARGET_VERSION"
+          fi
+
+    - name: Deployment Summary
+      if: always()
+      run: |
+        echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: ${{ needs.determine-environment.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Mode**: ${{ steps.version.outputs.mode }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY

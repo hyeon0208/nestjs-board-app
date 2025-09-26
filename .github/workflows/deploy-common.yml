@@ -1,8 +1,13 @@
-name: 🚧 Deploy to Development
+name: 🔧 Common Deploy Workflow
+
+# 환경 선택 → 2. 버전 생성/롤백 → 3. 승인(Prod만) → 4. 빌드&푸시 → 5. EC2 배포 → 6. 헬스체크 → 7. 완료/롤백
 
 on:
   workflow_call:
     inputs:
+      environment:
+        required: true
+        type: string
       rollback_version:
         required: false
         type: string
@@ -13,32 +18,42 @@ env:
   DEPLOY_PATH: ~/syncly-crawler
 
 jobs:
-  deploy-dev:
+  approval:
+    if: inputs.environment == 'prod'
     runs-on: ubuntu-latest
-    environment: dev
+    environment: 
+      name: prod-approval
+      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+    - name: Wait for approval
+      run: echo "Waiting for production deployment approval..."
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [approval]
+    if: always() && (inputs.environment != 'prod' || needs.approval.result == 'success')
+    environment: ${{ inputs.environment }}
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Generate commit-based version
+    - name: Generate version
       id: version
       run: |
         if [ -n "${{ inputs.rollback_version }}" ]; then
           echo "version=${{ inputs.rollback_version }}" >> $GITHUB_OUTPUT
           echo "mode=rollback" >> $GITHUB_OUTPUT
-          echo "🔄 [DEV] Rollback mode to version: ${{ inputs.rollback_version }}"
+          echo "[${{ inputs.environment }}] Rollback to: ${{ inputs.rollback_version }}"
         else
           SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
           TIMESTAMP=$(date +%Y.%m.%d)
-          VERSION="v${TIMESTAMP}-${SHORT_SHA}-dev"
+          SUFFIX=${{ inputs.environment == 'dev' && '-dev' || '' }}
+          VERSION="v${TIMESTAMP}-${SHORT_SHA}${SUFFIX}"
           
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "mode=deploy" >> $GITHUB_OUTPUT
-          echo "🚧 [DEV] Git commit based version: $VERSION"
-          
-          echo "commit_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "commit_message=$(git log -1 --pretty=%B | tr '\n' ' ' | cut -c1-50)" >> $GITHUB_OUTPUT
-          echo "author=${{ github.actor }}" >> $GITHUB_OUTPUT
+          echo "[${{ inputs.environment }}] New version: $VERSION"
         fi
 
     - name: Configure AWS credentials
@@ -52,20 +67,18 @@ jobs:
     - name: Build and push to ECR
       if: steps.version.outputs.mode == 'deploy'
       run: |
-        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+        aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
         
         docker build \
           --label "version=${{ steps.version.outputs.version }}" \
-          --label "commit.sha=${{ steps.version.outputs.commit_sha }}" \
-          --label "commit.message=${{ steps.version.outputs.commit_message }}" \
-          --label "build.author=${{ steps.version.outputs.author }}" \
-          --label "build.environment=dev" \
+          --label "environment=${{ inputs.environment }}" \
+          --label "commit.sha=${{ github.sha }}" \
           --label "build.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
           -t ${{ secrets.ECR_REGISTRY }}/$ECR_REPOSITORY:${{ steps.version.outputs.version }} .
         
         docker push ${{ secrets.ECR_REGISTRY }}/$ECR_REPOSITORY:${{ steps.version.outputs.version }}
         
-        echo "✅ [DEV] Image built and pushed: ${{ steps.version.outputs.version }}"
+        echo "Image pushed: ${{ steps.version.outputs.version }}"
 
     - name: Upload files to EC2
       uses: appleboy/scp-action@v1
@@ -77,37 +90,31 @@ jobs:
         target: "${{ env.DEPLOY_PATH }}/"
         overwrite: true
 
-    - name: Deploy to Development EC2
+    - name: Deploy to EC2
       uses: appleboy/ssh-action@v1
       env:
         DEPLOY_MODE: ${{ steps.version.outputs.mode }}
         TARGET_VERSION: ${{ steps.version.outputs.version }}
-        COMMIT_SHA: ${{ steps.version.outputs.commit_sha }}
-        COMMIT_MESSAGE: ${{ steps.version.outputs.commit_message }}
-        BUILD_AUTHOR: ${{ steps.version.outputs.author }}
+        ENVIRONMENT: ${{ inputs.environment }}
         ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
         ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
-        ENVIRONMENT: dev
-        # 개발 환경 변수들
-        CW_LOG_GROUP: ${{ secrets.DEV_CW_LOG_GROUP }}
-        CW_STREAM_PREFIX: ${{ secrets.DEV_CW_STREAM_PREFIX }}
-        DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
-        REDIS_URL: ${{ secrets.DEV_REDIS_URL }}
-        JWT_SECRET: ${{ secrets.DEV_JWT_SECRET }}
-        API_KEY: ${{ secrets.DEV_API_KEY }}
+        CW_LOG_GROUP: ${{ secrets.CW_LOG_GROUP }}
+        CW_STREAM_PREFIX: ${{ secrets.CW_STREAM_PREFIX }}
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        REDIS_URL: ${{ secrets.REDIS_URL }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        API_KEY: ${{ secrets.API_KEY }}
       with:
-        host: ${{ secrets.DEV_HOST }}
-        username: ${{ secrets.DEV_USERNAME }}
-        key: ${{ secrets.DEV_SSH_PRIVATE_KEY }}
-        envs: DEPLOY_MODE,TARGET_VERSION,COMMIT_SHA,COMMIT_MESSAGE,BUILD_AUTHOR,ECR_REGISTRY,ECR_REPOSITORY,ENVIRONMENT,CW_LOG_GROUP,CW_STREAM_PREFIX,DATABASE_URL,REDIS_URL,JWT_SECRET,API_KEY
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        envs: DEPLOY_MODE,TARGET_VERSION,ENVIRONMENT,ECR_REGISTRY,ECR_REPOSITORY,CW_LOG_GROUP,CW_STREAM_PREFIX,DATABASE_URL,REDIS_URL,JWT_SECRET,API_KEY
         script: |
           cd ${{ env.DEPLOY_PATH }}
           chmod +x scripts/*.sh
           
           if [ "$DEPLOY_MODE" = "rollback" ]; then
-            echo "🔄 [DEV] Starting rollback to version: $TARGET_VERSION"
             ./scripts/rollback.sh "$TARGET_VERSION"
           else
-            echo "🚧 [DEV] Starting deployment of version: $TARGET_VERSION"
             ./scripts/deploy.sh "$TARGET_VERSION"
           fi

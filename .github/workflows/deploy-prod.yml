@@ -1,49 +1,113 @@
-name: 📊 prod-cd
+name: 🚀 Deploy to Production
 
 on:
   workflow_call:
+    inputs:
+      rollback_version:
+        required: false
+        type: string
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: syncly-crawler-v2-base
+  DEPLOY_PATH: ~/syncly-crawler
 
 jobs:
-  deploy:
-    name: 운영환경 배포
+  deploy-prod:
     runs-on: ubuntu-latest
     environment: prod
     steps:
-    - name: 환경 정보 출력
-      run: |
-        echo "⚠️ 운영환경 배포 시작"
-        echo "현재 시간: $(date)"
-        
-    - name: Environment Secrets 테스트
-      run: |
-        echo "=== Secrets 존재 여부 확인 ==="
-        echo "DATABASE_URL 길이: ${#DATABASE_URL}"
-        echo "API_KEY 길이: ${#API_KEY}"
-        
-        # 첫 3글자만 출력해서 실제 값 확인
-        if [ -n "$DATABASE_URL" ]; then
-        echo "DATABASE_URL 앞 3글자: ${DATABASE_URL:0:3}..."
-        fi
-        
-        if [ -n "$API_KEY" ]; then
-        echo "API_KEY 앞 3글자: ${API_KEY:0:3}..."
-        fi
-        
-        # 환경변수 전체 목록에서 확인
-        echo "=== 환경변수 목록에서 SECRET 관련 확인 ==="
-        env | grep -E "(DATABASE|API)" || echo "관련 환경변수 없음"
+    - name: Checkout code
+      uses: actions/checkout@v4
 
+    - name: Generate commit-based version
+      id: version
+      run: |
+        if [ -n "${{ inputs.rollback_version }}" ]; then
+          echo "version=${{ inputs.rollback_version }}" >> $GITHUB_OUTPUT
+          echo "mode=rollback" >> $GITHUB_OUTPUT
+          echo "🔄 [PROD] Rollback mode to version: ${{ inputs.rollback_version }}"
+        else
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          TIMESTAMP=$(date +%Y.%m.%d)
+          VERSION="v${TIMESTAMP}-${SHORT_SHA}"
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "mode=deploy" >> $GITHUB_OUTPUT
+          echo "🚀 [PROD] Git commit based version: $VERSION"
+          
+          echo "commit_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "commit_message=$(git log -1 --pretty=%B | tr '\n' ' ' | cut -c1-50)" >> $GITHUB_OUTPUT
+          echo "author=${{ github.actor }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Configure AWS credentials
+      if: steps.version.outputs.mode == 'deploy'
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Build and push to ECR
+      if: steps.version.outputs.mode == 'deploy'
+      run: |
+        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+        
+        docker build \
+          --label "version=${{ steps.version.outputs.version }}" \
+          --label "commit.sha=${{ steps.version.outputs.commit_sha }}" \
+          --label "commit.message=${{ steps.version.outputs.commit_message }}" \
+          --label "build.author=${{ steps.version.outputs.author }}" \
+          --label "build.environment=prod" \
+          --label "build.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          -t ${{ secrets.ECR_REGISTRY }}/$ECR_REPOSITORY:${{ steps.version.outputs.version }} .
+        
+        docker push ${{ secrets.ECR_REGISTRY }}/$ECR_REPOSITORY:${{ steps.version.outputs.version }}
+        
+        echo "✅ [PROD] Image built and pushed: ${{ steps.version.outputs.version }}"
+
+    - name: Upload files to EC2
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USERNAME }}
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        source: "scripts/*,docker-compose.yml"
+        target: "${{ env.DEPLOY_PATH }}/"
+        overwrite: true
+
+    - name: Deploy to Production EC2
+      uses: appleboy/ssh-action@v1
       env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        API_KEY: ${{ secrets.API_KEY }}
-        
-    - name: Environment Variables 테스트
-      run: |
-        echo "=== Prod Environment Variables ==="
-        echo "LOG_LEVEL: ${{ vars.LOG_LEVEL }}"
-        echo "PORT: ${{ vars.PORT }}"
-        
-    - name: 운영환경 배포 시뮬레이션
-      run: |
-        echo "🚀 운영 서버 배포 중..."
-        echo "✅ 운영환경 배포 완료!"
+        DEPLOY_MODE: ${{ steps.version.outputs.mode }}
+        TARGET_VERSION: ${{ steps.version.outputs.version }}
+        COMMIT_SHA: ${{ steps.version.outputs.commit_sha }}
+        COMMIT_MESSAGE: ${{ steps.version.outputs.commit_message }}
+        BUILD_AUTHOR: ${{ steps.version.outputs.author }}
+        ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+        ENVIRONMENT: prod
+        # 프로덕션 환경 변수들
+        CW_LOG_GROUP: ${{ secrets.PROD_CW_LOG_GROUP }}
+        CW_STREAM_PREFIX: ${{ secrets.PROD_CW_STREAM_PREFIX }}
+        DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        REDIS_URL: ${{ secrets.PROD_REDIS_URL }}
+        JWT_SECRET: ${{ secrets.PROD_JWT_SECRET }}
+        API_KEY: ${{ secrets.PROD_API_KEY }}
+      with:
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USERNAME }}
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        envs: DEPLOY_MODE,TARGET_VERSION,COMMIT_SHA,COMMIT_MESSAGE,BUILD_AUTHOR,ECR_REGISTRY,ECR_REPOSITORY,ENVIRONMENT,CW_LOG_GROUP,CW_STREAM_PREFIX,DATABASE_URL,REDIS_URL,JWT_SECRET,API_KEY
+        script: |
+          cd ${{ env.DEPLOY_PATH }}
+          chmod +x scripts/*.sh
+          
+          if [ "$DEPLOY_MODE" = "rollback" ]; then
+            echo "🔄 [PROD] Starting rollback to version: $TARGET_VERSION"
+            ./scripts/rollback.sh "$TARGET_VERSION"
+          else
+            echo "🚀 [PROD] Starting deployment of version: $TARGET_VERSION"
+            ./scripts/deploy.sh "$TARGET_VERSION"
+          fi
