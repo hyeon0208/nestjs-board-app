@@ -16,7 +16,8 @@ permissions:
 
 env:
   AWS_REGION: ap-northeast-2
-  ECR_REPOSITORY: syncly-crawler-v2-base
+  ECR_REPOSITORY: test-repo
+  APP_NAME: board-app
 
 jobs:
   determine-environment:
@@ -31,9 +32,9 @@ jobs:
         echo "environment=${{ inputs.target_environment }}" >> $GITHUB_OUTPUT
         
         if [ "${{ inputs.target_environment }}" = "dev" ]; then
-          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["dev"]},{"Key":"tag:App","Values":["syncly-crawler"]}]' >> $GITHUB_OUTPUT
+          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["dev"]},{"Key":"tag:App","Values":["'${{ env.APP_NAME }}'"]}]' >> $GITHUB_OUTPUT
         else
-          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["prod"]},{"Key":"tag:App","Values":["syncly-crawler"]}]' >> $GITHUB_OUTPUT
+          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["prod"]},{"Key":"tag:App","Values":["'${{ env.APP_NAME }}'"]}]' >> $GITHUB_OUTPUT
         fi
 
   approval: # prod 환경일 때만 실행 수동 승인 필요
@@ -106,7 +107,7 @@ jobs:
     - name: Update SSM Parameters By Current Deployed Info
       run: |
         aws ssm put-parameter \
-          --name "/syncly-crawler/${{ needs.determine-environment.outputs.environment }}/image-uri" \
+          --name "/${{ env.APP_NAME }}/${{ needs.determine-environment.outputs.environment }}/image-uri" \
           --value "${{ needs.build-push.outputs.image_uri }}" \
           --type "String" \
           --overwrite
@@ -121,9 +122,9 @@ jobs:
           --document-name "AWS-RunShellScript" \
           --targets "${{ needs.determine-environment.outputs.ssm_targets }}" \
           --parameters 'commands=[
-          "aws s3 cp s3://syncly-crawling-bucket/scripts/deploy.sh - | bash -s -- ${{ needs.determine-environment.outputs.environment }} ${{ needs.build-push.outputs.version }}"
+          "aws s3 cp s3://${{ env.APP_NAME }}-bucket/scripts/deploy.sh - | bash -s -- ${{ needs.determine-environment.outputs.environment }} ${{ needs.build-push.outputs.version }}"
           ]' \
-          --comment "Deploy syncly-crawler ${{ needs.build-push.outputs.version }} to ${{ needs.determine-environment.outputs.environment }}" \
+          --comment "Deploy ${{ env.APP_NAME }} ${{ needs.build-push.outputs.version }} to ${{ needs.determine-environment.outputs.environment }}" \
           --region ${{ env.AWS_REGION }} \
           --output text --query 'Command.CommandId')
         

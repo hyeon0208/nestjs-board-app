@@ -10,8 +10,8 @@ set -euo pipefail
 
 DEPLOYMENT_ENV=${1:-"dev"}
 VERSION=${2:-"latest"}
-APP_NAME="syncly-crawler"
-ECR_REPOSITORY="syncly-crawler-v2-base"
+APP_NAME="board-app"
+ECR_REPOSITORY="test-repo"
 AWS_REGION="ap-northeast-2"
 CONTAINER_NAME="${APP_NAME}-${DEPLOYMENT_ENV}"
 COMPOSE_FILE="~/docker-compose.yml"
@@ -40,7 +40,7 @@ generate_env_file() {
     
     # Parameter Store에서 환경변수 가져와서 .env 파일 생성
     aws ssm get-parameters-by-path \
-        --path "/syncly-crawler/${DEPLOYMENT_ENV}" \
+        --path "/${APP_NAME}/${DEPLOYMENT_ENV}" \
         --with-decryption \
         --query "Parameters[*].[Name,Value]" \
         --output text | while read name value; do  
@@ -73,7 +73,7 @@ generate_env_file() {
 log "🚀 Starting deployment of ${APP_NAME} ${VERSION} to ${DEPLOYMENT_ENV}"
 
 NEW_IMAGE_URI=$(aws ssm get-parameter \
-    --name "/syncly-crawler/${DEPLOYMENT_ENV}/image-uri" \
+    --name "/${APP_NAME}/${DEPLOYMENT_ENV}/image-uri" \
     --query 'Parameter.Value' --output text) || \
     error_exit "Failed to get image URI from SSM Parameter Store"
 
@@ -183,7 +183,7 @@ docker compose -f ${COMPOSE_FILE} ps
 # 배포 성공 알림을 위한 메트릭 전송
 log "📊 Sending success metric to CloudWatch..."
 aws cloudwatch put-metric-data \
-    --namespace "Syncly/Deployment" \
+    --namespace "${APP_NAME}/Deployment" \
     --metric-data '[
         {
             "MetricName": "DeploymentSuccess",
@@ -191,7 +191,7 @@ aws cloudwatch put-metric-data \
             "Unit": "Count",
             "Dimensions": [
                 {"Name": "Environment", "Value": "'${DEPLOYMENT_ENV}'"},
-                {"Name": "Application", "Value": "syncly-crawler"}
+                {"Name": "Application", "Value": "'${APP_NAME}'"}
             ]
         }
     ]' 2>/dev/null || log "Warning: Failed to send success metric"
