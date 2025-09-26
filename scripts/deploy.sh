@@ -1,14 +1,24 @@
 #!/bin/bash
+
+# 사용법: ./deploy.sh <deployment env> <version>
+
 set -euo pipefail
 
-readonly TARGET_VERSION=$1
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly BACKUP_VERSIONS_FILE=".backup_versions"
+# =============================================================================
+# 설정 및 변수
+# =============================================================================
 
-# 함수 정의
+DEPLOYMENT_ENV=${1:-"dev"}
+VERSION=${2:-"latest"}
+APP_NAME="syncly-crawler"
+ECR_REPOSITORY="syncly-crawler-v2-base"
+AWS_REGION="ap-northeast-2"
+CONTAINER_NAME="${APP_NAME}-${DEPLOYMENT_ENV}"
+COMPOSE_FILE="~/docker-compose.yml"
+ENV_FILE="~/.env.${DEPLOYMENT_ENV}"
+
 log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$ENVIRONMENT] $1"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$ENVIRONMENT] $1" >> logs/deploy.log
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
 error_exit() {
@@ -16,149 +26,174 @@ error_exit() {
     exit 1
 }
 
-backup_current_version() {
-    log "Backing up current version..."
-    local current_version
-    current_version=$(docker-compose ps --format json 2>/dev/null | jq -r '.[0].Image' 2>/dev/null | cut -d':' -f2 2>/dev/null || echo "none")
+# =============================================================================
+# Parameter Store에서 환경변수 가져와서 .env 파일 생성
+# =============================================================================
+
+generate_env_file() {
+    log "🔧 Loading environment variables from Parameter Store for ${DEPLOYMENT_ENV}..."
     
-    # 백업 버전 히스토리 관리 (최대 5개)
-    {
-        echo "$current_version"
-        if [[ -f "$BACKUP_VERSIONS_FILE" ]]; then
-            head -4 "$BACKUP_VERSIONS_FILE"
-        fi
-    } > "${BACKUP_VERSIONS_FILE}.tmp"
-    mv "${BACKUP_VERSIONS_FILE}.tmp" "$BACKUP_VERSIONS_FILE"
+    # 기존 .env 파일 초기화
+    echo "# Environment variables for ${DEPLOYMENT_ENV}" > ${ENV_FILE}
+    echo "# Generated from Parameter Store at $(date)" >> ${ENV_FILE}
+    echo "" >> ${ENV_FILE}
     
-    echo "$current_version" > .current_version
-    log "Current version backed up: $current_version"
+    # Parameter Store에서 환경변수 가져와서 .env 파일 생성
+    aws ssm get-parameters-by-path \
+        --path "/syncly-crawler/${DEPLOYMENT_ENV}" \
+        --with-decryption \
+        --query "Parameters[*].[Name,Value]" \
+        --output text | while read name value; do  
+            key=$(echo $name | sed 's|.*/||')
+            echo "$key=$value" >> ${ENV_FILE}
+    done || error_exit "Failed to get parameters from Parameter Store"
+    
+    # 생성된 환경변수 개수 확인
+    ENV_COUNT=$(grep -c "^[A-Z]" ${ENV_FILE} 2>/dev/null || echo "0")
+    log "✅ Generated .env file with ${ENV_COUNT} environment variables"
+    
+    # 파일 권한 설정
+    chmod 600 ${ENV_FILE}
+    
+    log "📁 Environment file saved to: ${ENV_FILE}"
+    
+    # 디버그용: 환경변수 목록 출력 (값은 숨김)
+    if [ ${ENV_COUNT} -gt 0 ]; then
+        log "📋 Loaded environment variables:"
+        grep "^[A-Z]" ${ENV_FILE} | cut -d'=' -f1 | while read var; do
+            log "   - $var"
+        done
+    fi
 }
 
-login_ecr() {
-    log "Logging in to ECR..."
-    aws ecr get-login-password --region ap-northeast-2 | \
-        docker login --username AWS --password-stdin "$(echo "$ECR_REGISTRY" | cut -d'/' -f1)" || \
-        error_exit "ECR login failed"
-}
+# =============================================================================
+# SSM Parameter에서 이미지 URI 가져오기 (워크플로우에서 저장한 값)
+# =============================================================================
 
-smart_image_cleanup() {
-    log "Smart image cleanup..."
-    
-    # 현재 실행 중인 이미지 보호
-    local running_images
-    running_images=$(docker ps --format "table {{.Image}}" | tail -n +2 | sort -u)
-    
-    # 백업 버전들 보호
-    local protected_images=""
-    if [[ -f "$BACKUP_VERSIONS_FILE" ]]; then
-        while IFS= read -r version; do
-            [[ "$version" != "none" && -n "$version" ]] && \
-                protected_images="$protected_images $ECR_REGISTRY/$ECR_REPOSITORY:$version"
-        done < "$BACKUP_VERSIONS_FILE"
+log "🚀 Starting deployment of ${APP_NAME} ${VERSION} to ${DEPLOYMENT_ENV}"
+
+NEW_IMAGE_URI=$(aws ssm get-parameter \
+    --name "/syncly-crawler/${DEPLOYMENT_ENV}/image-uri" \
+    --query 'Parameter.Value' --output text) || \
+    error_exit "Failed to get image URI from SSM Parameter Store"
+
+log "📦 Target image: ${NEW_IMAGE_URI}"
+
+# =============================================================================
+# 환경변수 파일 생성
+# =============================================================================
+
+generate_env_file
+
+# =============================================================================
+# ECR 로그인
+# =============================================================================
+
+log "🔐 Logging into ECR..."
+# EC2 인스턴스의 IAM 역할에 ECR 권한 필요:
+ECR_REGISTRY=$(echo ${NEW_IMAGE_URI} | cut -d'/' -f1)
+aws ecr get-login-password --region ${AWS_REGION} | \
+    docker login --username AWS --password-stdin ${ECR_REGISTRY} || \
+    error_exit "ECR login failed"
+
+# =============================================================================
+# 이미지 Pull
+# =============================================================================
+
+log "📥 Pulling new image..."
+docker pull ${NEW_IMAGE_URI} || error_exit "Failed to pull image ${NEW_IMAGE_URI}"
+
+# =============================================================================
+# 기존 컨테이너 백업 및 새 컨테이너 시작
+# =============================================================================
+
+# 기존 컨테이너 이미지를 롤백용으로 저장
+BACKUP_IMAGE=""
+if docker ps -q -f name=${CONTAINER_NAME} | grep -q .; then
+    BACKUP_IMAGE=$(docker inspect ${CONTAINER_NAME} \
+        --format='{{.Config.Image}}' 2>/dev/null || echo "")
+    log "💾 Backup image saved: ${BACKUP_IMAGE}"
+fi
+
+# Docker Compose 환경변수 설정
+export IMAGE_URI=${NEW_IMAGE_URI}
+export DEPLOYMENT_ENV=${DEPLOYMENT_ENV}
+
+# 홈 디렉토리로 이동
+cd ~
+
+# 기존 컨테이너 중지 및 새 컨테이너 시작
+log "🏁 Starting new container with docker-compose using environment: ${DEPLOYMENT_ENV}..."
+log "📂 Using compose file: ${COMPOSE_FILE}"
+log "📂 Using env file: ${ENV_FILE}"
+docker compose -f ${COMPOSE_FILE} up -d --force-recreate || error_exit "Failed to start with docker-compose"
+
+# =============================================================================
+# 헬스체크
+# =============================================================================
+
+log "🏥 Performing health check..."
+HEALTH_CHECK_RETRIES=12
+HEALTH_CHECK_INTERVAL=5
+
+for i in $(seq 1 ${HEALTH_CHECK_RETRIES}); do
+    if curl -f -s http://localhost:8080/health > /dev/null 2>&1; then
+        log "✅ Health check passed (attempt ${i}/${HEALTH_CHECK_RETRIES})"
+        break
     fi
     
-    # 댕글링 이미지 정리
-    docker image prune -f >/dev/null 2>&1 || true
-    
-    # 7일 이상된 이미지 중 보호 대상이 아닌 것만 정리
-    docker images "$ECR_REGISTRY/$ECR_REPOSITORY" --format "table {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}" 2>/dev/null | \
-        tail -n +2 | \
-        awk -v date="$(date -d '7 days ago' '+%Y-%m-%d')" '$2 < date {print $1}' | \
-        while read -r image; do
-            if [[ ! "$protected_images $running_images" =~ $image ]]; then
-                log "Removing old image: $image"
-                docker rmi "$image" 2>/dev/null || true
-            fi
-        done || true
-}
-
-create_env_file() {
-    log "Creating environment file..."
-    cat > .env << EOF
-TARGET_VERSION=$TARGET_VERSION
-ENVIRONMENT=$ENVIRONMENT
-DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-ECR_REGISTRY=$ECR_REGISTRY
-ECR_REPOSITORY=$ECR_REPOSITORY
-CW_LOG_GROUP=$CW_LOG_GROUP
-CW_STREAM_PREFIX=$CW_STREAM_PREFIX
-DATABASE_URL=$DATABASE_URL
-REDIS_URL=$REDIS_URL
-JWT_SECRET=$JWT_SECRET
-API_KEY=$API_KEY
-NODE_ENV=production
-SERVICE_NAME=api-worker
-EOF
-    chmod 600 .env
-}
-
-deploy_container() {
-    log "Pulling image: $TARGET_VERSION"
-    docker pull "$ECR_REGISTRY/$ECR_REPOSITORY:$TARGET_VERSION" || \
-        error_exit "Failed to pull image"
-
-    log "Deploying containers..."
-    docker-compose down && docker-compose up -d || \
-        error_exit "Container deployment failed"
-}
-
-multi_level_rollback() {
-    local attempt=1
-    local max_attempts=3
-    
-    log "Starting multi-level rollback strategy..."
-    
-    while [[ $attempt -le $max_attempts ]]; do
-        log "Rollback attempt $attempt/$max_attempts"
+    if [ ${i} -eq ${HEALTH_CHECK_RETRIES} ]; then
+        log "❌ Health check failed after ${HEALTH_CHECK_RETRIES} attempts"
         
-        local rollback_version
-        if [[ -f "$BACKUP_VERSIONS_FILE" ]]; then
-            rollback_version=$(sed -n "${attempt}p" "$BACKUP_VERSIONS_FILE")
-            
-            if [[ "$rollback_version" != "none" && -n "$rollback_version" ]]; then
-                log "Attempting rollback to: $rollback_version"
-                
-                if "$SCRIPT_DIR/rollback.sh" "$rollback_version"; then
-                    log "Rollback successful to: $rollback_version"
-                    return 0
-                else
-                    log "Rollback failed for version: $rollback_version"
-                fi
-            fi
+        # 실패 시 롤백 수행
+        if [ -n "${BACKUP_IMAGE}" ]; then
+            log "🔄 Rolling back to previous image..."
+            export IMAGE_URI=${BACKUP_IMAGE}
+            docker compose -f ${COMPOSE_FILE} down || true
+            docker compose -f ${COMPOSE_FILE} up -d || error_exit "Rollback failed"
         fi
         
-        ((attempt++))
-    done
-    
-    error_exit "All rollback attempts failed - manual intervention required"
-}
-
-# 메인 로직
-main() {
-    [[ -z "$TARGET_VERSION" ]] && error_exit "Version not provided"
-    
-    log "=== Starting deployment: $TARGET_VERSION ==="
-    
-    mkdir -p logs
-    
-    backup_current_version
-    login_ecr
-    smart_image_cleanup
-    create_env_file
-    deploy_container
-    
-    # 헬스체크
-    log "Running health check..."
-    if ! "$SCRIPT_DIR/health-check.sh"; then
-        log "Health check failed, attempting rollback..."
-        multi_level_rollback
-        exit 1
+        error_exit "Deployment failed - health check timeout"
     fi
     
-    log "=== Deployment completed successfully: $TARGET_VERSION ==="
-    
-    # 최종 정리
-    docker image prune -f >/dev/null 2>&1 || true
-}
+    log "⏳ Health check attempt ${i}/${HEALTH_CHECK_RETRIES} failed, retrying in ${HEALTH_CHECK_INTERVAL}s..."
+    sleep ${HEALTH_CHECK_INTERVAL}
+done
 
-main "$@"
+# =============================================================================
+# 정리 및 완료
+# =============================================================================
+
+# 사용하지 않는 이미지 정리
+log "🧹 Cleaning up unused images..."
+docker image prune -f || true
+
+# SSM Parameter 업데이트 (배포 완료 시간 기록)
+log "📝 Updating deployment metadata..."
+aws ssm put-parameter \
+    --name "/${APP_NAME}/${DEPLOYMENT_ENV}/deployed-at" \
+    --value "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --type "String" \
+    --overwrite || log "Warning: Failed to update deployment timestamp"
+
+log "🎉 Deployment completed successfully!"
+log "📊 Container status:"
+docker compose -f ${COMPOSE_FILE} ps
+
+# 배포 성공 알림을 위한 메트릭 전송
+log "📊 Sending success metric to CloudWatch..."
+aws cloudwatch put-metric-data \
+    --namespace "Syncly/Deployment" \
+    --metric-data '[
+        {
+            "MetricName": "DeploymentSuccess",
+            "Value": 1,
+            "Unit": "Count",
+            "Dimensions": [
+                {"Name": "Environment", "Value": "'${DEPLOYMENT_ENV}'"},
+                {"Name": "Application", "Value": "syncly-crawler"}
+            ]
+        }
+    ]' 2>/dev/null || log "Warning: Failed to send success metric"
+
+exit 0

@@ -1,0 +1,157 @@
+name: 🚀 Deploy Application
+
+on:
+  workflow_dispatch: # 수동 실행
+    inputs:
+      target_environment:
+        description: 'Target Environment'
+        required: true
+        type: choice
+        options: ['dev', 'prod'] # 환경 선택
+        default: 'dev'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: syncly-crawler-v2-base
+
+jobs:
+  determine-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      ssm_targets: ${{ steps.env.outputs.ssm_targets }}
+    steps:
+    - name: Determine environment and SSM targets
+      id: env
+      run: |
+        echo "environment=${{ inputs.target_environment }}" >> $GITHUB_OUTPUT
+        
+        if [ "${{ inputs.target_environment }}" = "dev" ]; then
+          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["dev"]},{"Key":"tag:App","Values":["syncly-crawler"]}]' >> $GITHUB_OUTPUT
+        else
+          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["prod"]},{"Key":"tag:App","Values":["syncly-crawler"]}]' >> $GITHUB_OUTPUT
+        fi
+
+  approval: # prod 환경일 때만 실행 수동 승인 필요
+    needs: [determine-environment]
+    if: needs.determine-environment.outputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: prod-approval
+    steps:
+    - name: Wait for production approval
+      run: echo "🔒 Production deployment requires approval"
+
+  build-push:
+    needs: [determine-environment, approval]
+    if: always() && needs.determine-environment.result == 'success' && (needs.determine-environment.outputs.environment != 'prod' || needs.approval.result == 'success')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image_uri: ${{ steps.build.outputs.image_uri }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Generate version
+      id: version
+      run: |
+        SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+        TIMESTAMP=$(date +%Y.%m.%d)
+        SUFFIX=${{ needs.determine-environment.outputs.environment == 'dev' && '-dev' || '-prod' }}
+        VERSION="v${TIMESTAMP}-${SHORT_SHA}${SUFFIX}" # ex: v2025.01.01-abc1234-dev
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "🚀 [${{ needs.determine-environment.outputs.environment }}] New version: $VERSION"
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build and push to ECR
+      id: build
+      run: |
+        IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}
+        
+        docker build -t $IMAGE_URI .
+        docker push $IMAGE_URI
+        
+        echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+        echo "🚀 Pushed: $IMAGE_URI"
+
+  deploy:
+    needs: [determine-environment, build-push]
+    if: needs.build-push.result == 'success'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update SSM Parameters By Current Deployed Info
+      run: |
+        aws ssm put-parameter \
+          --name "/syncly-crawler/${{ needs.determine-environment.outputs.environment }}/image-uri" \
+          --value "${{ needs.build-push.outputs.image_uri }}" \
+          --type "String" \
+          --overwrite
+
+    - name: Trigger SSM Deploy Command
+      id: deploy
+      run: |
+        echo "🎯 Deploying to: ${{ needs.determine-environment.outputs.environment }}"
+        echo "📦 Version: ${{ needs.build-push.outputs.version }}"
+        
+        COMMAND_ID=$(aws ssm send-command \
+          --document-name "AWS-RunShellScript" \
+          --targets "${{ needs.determine-environment.outputs.ssm_targets }}" \
+          --parameters 'commands=[
+          "aws s3 cp s3://syncly-crawling-bucket/scripts/deploy.sh - | bash -s -- ${{ needs.determine-environment.outputs.environment }} ${{ needs.build-push.outputs.version }}"
+          ]' \
+          --comment "Deploy syncly-crawler ${{ needs.build-push.outputs.version }} to ${{ needs.determine-environment.outputs.environment }}" \
+          --region ${{ env.AWS_REGION }} \
+          --output text --query 'Command.CommandId')
+        
+        echo "📡 SSM Command ID: $COMMAND_ID"
+        echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
+
+    - name: Wait for deployment completion
+      run: |
+        echo "⏳ Waiting for deployment to complete..."
+        
+        for i in {1..36}; do
+          STATUS=$(aws ssm list-command-invocations \
+            --command-id ${{ steps.deploy.outputs.command_id }} \
+            --query 'CommandInvocations[0].Status' \
+            --output text)
+          
+          echo "Status check $i/36: $STATUS"
+          
+          if [ "$STATUS" = "Success" ]; then
+            echo "✅ Deployment completed successfully!"
+            exit 0
+          elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
+            echo "❌ Deployment failed with status: $STATUS"
+            exit 1
+          fi
+          
+          sleep 5
+        done
+        
+        echo "⏰ Deployment timed out after 3 minutes"
+        exit 1

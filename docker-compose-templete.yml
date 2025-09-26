@@ -1,25 +1,15 @@
+version: '3.8'
 services:
-  api-worker:
-    env_file: .env
-    image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${TARGET_VERSION}
-    mem_limit: 2gb
+  syncly-crawler:
+    image: ${IMAGE_URI}
+    container_name: syncly-crawler-${ENVIRONMENT}
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "8080:8080"
     environment:
-      - SERVICE_NAME=api-worker
-      - VERSION=${TARGET_VERSION}
-    tty: true
-    command: pnpm node --max-old-space-size=1638 dist/api/main.js
-    logging:
-      driver: awslogs
-      options:
-        awslogs-group: ${CW_LOG_GROUP}
-        awslogs-region: ap-northeast-2
-        awslogs-create-group: 'true'
-        tag: '${CW_STREAM_PREFIX}/{{.ID}}'
+      - ENVIRONMENT=${ENVIRONMENT}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
