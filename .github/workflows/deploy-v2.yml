@@ -1,13 +1,13 @@
-name: 🚀 Deploy Application
+name: 🚀 Deploy Dispatcher
 
 on:
-  workflow_dispatch: # 수동 실행
+  workflow_dispatch:
     inputs:
       target_environment:
-        description: 'Target Environment'
+        description: '배포할 환경을 선택해주세요.'
         required: true
         type: choice
-        options: ['dev', 'prod'] # 환경 선택
+        options: ['dev', 'prod']
         default: 'dev'
 
 permissions:
@@ -16,8 +16,9 @@ permissions:
 
 env:
   AWS_REGION: ap-northeast-2
-  ECR_REPOSITORY: test-repo
-  APP_NAME: board-app
+  APP_NAME: test-app
+  ECR_REPOSITORY: ${APP_NAME}-repo
+  S3_BUCKET: test-app-bucket
 
 jobs:
   determine-environment:
@@ -32,16 +33,16 @@ jobs:
         echo "environment=${{ inputs.target_environment }}" >> $GITHUB_OUTPUT
         
         if [ "${{ inputs.target_environment }}" = "dev" ]; then
-          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["dev"]},{"Key":"tag:App","Values":["'${{ env.APP_NAME }}'"]}]' >> $GITHUB_OUTPUT
+          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["dev"]},{"Key":"tag:App","Values":["${{ env.APP_NAME }}"]}]' >> $GITHUB_OUTPUT
         else
-          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["prod"]},{"Key":"tag:App","Values":["'${{ env.APP_NAME }}'"]}]' >> $GITHUB_OUTPUT
+          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["prod"]},{"Key":"tag:App","Values":["${{ env.APP_NAME }}"]}]' >> $GITHUB_OUTPUT
         fi
 
   approval: # prod 환경일 때만 실행 수동 승인 필요
     needs: [determine-environment]
     if: needs.determine-environment.outputs.environment == 'prod'
     runs-on: ubuntu-latest
-    environment: prod-approval
+    environment: prod
     steps:
     - name: Wait for production approval
       run: echo "🔒 Production deployment requires approval"
@@ -115,15 +116,10 @@ jobs:
     - name: Trigger SSM Deploy Command
       id: deploy
       run: |
-        echo "🎯 Deploying to: ${{ needs.determine-environment.outputs.environment }}"
-        echo "📦 Version: ${{ needs.build-push.outputs.version }}"
-        
         COMMAND_ID=$(aws ssm send-command \
           --document-name "AWS-RunShellScript" \
           --targets "${{ needs.determine-environment.outputs.ssm_targets }}" \
-          --parameters 'commands=[
-          "aws s3 cp s3://${{ env.APP_NAME }}-bucket/scripts/deploy.sh - | bash -s -- ${{ needs.determine-environment.outputs.environment }} ${{ needs.build-push.outputs.version }}"
-          ]' \
+          --parameters 'commands=["aws s3 cp s3://${{ env.S3_BUCKET }}/scripts/deploy.sh - | bash -s -- ${{ env.APP_NAME }} ${{ needs.determine-environment.outputs.environment }} ${{ needs.build-push.outputs.version }}"]' \
           --comment "Deploy ${{ env.APP_NAME }} ${{ needs.build-push.outputs.version }} to ${{ needs.determine-environment.outputs.environment }}" \
           --region ${{ env.AWS_REGION }} \
           --output text --query 'Command.CommandId')

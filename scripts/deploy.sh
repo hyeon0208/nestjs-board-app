@@ -1,17 +1,18 @@
 #!/bin/bash
 
-# 사용법: ./deploy.sh <deployment env> <version>
-
 set -euo pipefail
 
 # =============================================================================
 # 설정 및 변수
 # =============================================================================
 
-DEPLOYMENT_ENV=${1:-"dev"}
-VERSION=${2:-"latest"}
-APP_NAME="board-app"
-ECR_REPOSITORY="test-repo"
+[[ $# -ne 3 ]] && { echo "Usage: $0 <app_name> <deployment_env> <version>"; exit 1; }
+
+APP_NAME="$1"
+DEPLOYMENT_ENV="$2"
+VERSION="$3"
+
+ECR_REPOSITORY="${APP_NAME}-repo"  
 AWS_REGION="ap-northeast-2"
 CONTAINER_NAME="${APP_NAME}-${DEPLOYMENT_ENV}"
 COMPOSE_FILE="~/docker-compose.yml"
@@ -167,33 +168,5 @@ done
 # 사용하지 않는 이미지 정리
 log "🧹 Cleaning up unused images..."
 docker image prune -f || true
-
-# SSM Parameter 업데이트 (배포 완료 시간 기록)
-log "📝 Updating deployment metadata..."
-aws ssm put-parameter \
-    --name "/${APP_NAME}/${DEPLOYMENT_ENV}/deployed-at" \
-    --value "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --type "String" \
-    --overwrite || log "Warning: Failed to update deployment timestamp"
-
-log "🎉 Deployment completed successfully!"
-log "📊 Container status:"
-docker compose -f ${COMPOSE_FILE} ps
-
-# 배포 성공 알림을 위한 메트릭 전송
-log "📊 Sending success metric to CloudWatch..."
-aws cloudwatch put-metric-data \
-    --namespace "${APP_NAME}/Deployment" \
-    --metric-data '[
-        {
-            "MetricName": "DeploymentSuccess",
-            "Value": 1,
-            "Unit": "Count",
-            "Dimensions": [
-                {"Name": "Environment", "Value": "'${DEPLOYMENT_ENV}'"},
-                {"Name": "Application", "Value": "'${APP_NAME}'"}
-            ]
-        }
-    ]' 2>/dev/null || log "Warning: Failed to send success metric"
 
 exit 0
