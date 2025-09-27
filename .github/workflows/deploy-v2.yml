@@ -17,7 +17,7 @@ permissions:
 env:
   AWS_REGION: ap-northeast-2
   APP_NAME: test-app
-  ECR_REPOSITORY: ${APP_NAME}-repo
+  ECR_REPOSITORY: test-app-repo
   S3_BUCKET: test-app-bucket
 
 jobs:
