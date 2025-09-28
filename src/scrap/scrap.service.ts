@@ -44,6 +44,10 @@ export class ScrapService {
       count: productIds.length,
     });
 
+    logger.info('테스트 입니다', {
+      count: productIds.length,
+    });
+
     logger.debug('product:start');
 
     const pages = [1, 2, 3, 4, 5];

@@ -61,7 +61,7 @@ export class Product {
   category_id?: Types.ObjectId;
 }
 
-//여기서 Mongoose Schema 객체가 만들어지고, @Prop 메타데이터로 필드 정의만 들어감.
+// 여기서 Mongoose Schema 객체가 만들어지고, @Prop 메타데이터로 필드 정의만 들어감.
 // 즉, 필드는 Document에 매핑되지만, 클래스 자체의 인스턴스 메서드나 get accessor는 자동으로 들어가지 않아.
 export const ProductSchema = SchemaFactory.createForClass(Product);
 
@@ -98,7 +98,7 @@ class ProductMethods {
     if (reason) {
       this.metadata.set('discontinue_reason', reason);
       // Map 변경은 Mongoose가 추적하지만 안정적으로 표시 (경로 기반 set은 Mongoose가 자동으로 더티마킹)
-      //   (this as any).markModified('metadata');
+      // (this as any).markModified('metadata');
     }
   }
 

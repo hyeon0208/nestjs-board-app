@@ -17,7 +17,6 @@ permissions:
 env:
   AWS_REGION: ap-northeast-2
   APP_NAME: test-app
-  ECR_REPOSITORY: test-app-repo
   S3_BUCKET: test-app-bucket
 
 jobs:
@@ -83,7 +82,8 @@ jobs:
     - name: Build and push to ECR
       id: build
       run: |
-        IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}
+        ECR_REPOSITORY="${{ env.APP_NAME }}-${{ needs.determine-environment.outputs.environment }}"
+        IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${{ steps.version.outputs.version }}
         
         docker build -t $IMAGE_URI .
         docker push $IMAGE_URI
@@ -105,22 +105,18 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
-    - name: Update SSM Parameters By Current Deployed Info
-      run: |
-        aws ssm put-parameter \
-          --name "/${{ env.APP_NAME }}/${{ needs.determine-environment.outputs.environment }}/image-uri" \
-          --value "${{ needs.build-push.outputs.image_uri }}" \
-          --type "String" \
-          --overwrite
-
     - name: Trigger SSM Deploy Command
       id: deploy
       run: |
         COMMAND_ID=$(aws ssm send-command \
           --document-name "AWS-RunShellScript" \
           --targets "${{ needs.determine-environment.outputs.ssm_targets }}" \
-          --parameters 'commands=["aws s3 cp s3://${{ env.S3_BUCKET }}/scripts/deploy.sh - | bash -s -- ${{ env.APP_NAME }} ${{ needs.determine-environment.outputs.environment }} ${{ needs.build-push.outputs.version }}"]' \
-          --comment "Deploy ${{ env.APP_NAME }} ${{ needs.build-push.outputs.version }} to ${{ needs.determine-environment.outputs.environment }}" \
+          --parameters 'commands=[
+            "aws s3 cp s3://${{ env.S3_BUCKET }}/scripts/deploy.sh ~/deploy.sh --force",
+            "chmod +x ~/deploy.sh",
+            "~/deploy.sh ${{ env.APP_NAME }} ${{ needs.determine-environment.outputs.environment }} ${{ needs.build-push.outputs.image_uri }}"
+          ]' \
+          --comment "Deploy ${{ env.APP_NAME }} ${{ needs.build-push.outputs.image_uri }} to ${{ needs.determine-environment.outputs.environment }}" \
           --region ${{ env.AWS_REGION }} \
           --output text --query 'Command.CommandId')
         

@@ -58,39 +58,32 @@ export class CustomLogger implements LoggerService {
     console.error = (...args: any[]) => this.error(args.join(' '));
   }
 
-  trace(...args: unknown[]) {
-    // @ts-expect-error - Pino expects specific argument types
-    this.logger.trace(...args);
+  trace(msg: string, ...args: any[]) {
+    this.logger.trace(msg, ...args);
   }
 
-  debug(...args: unknown[]) {
-    // @ts-expect-error - Pino expects specific argument types
-    this.logger.debug(...args);
+  debug(msg: string, ...args: any[]) {
+    this.logger.debug(msg, ...args);
   }
 
-  log(...args: unknown[]) {
-    // @ts-expect-error - Pino expects specific argument types
-    this.logger.info(...args);
+  log(msg: string, ...args: any[]) {
+    this.logger.info(msg, ...args);
   }
 
-  info(...args: unknown[]) {
-    // @ts-expect-error - Pino expects specific argument types
-    this.logger.info(...args);
+  info(msg: string, ...args: any[]) {
+    this.logger.info(msg, ...args);
   }
 
-  warn(...args: unknown[]) {
-    // @ts-expect-error - Pino expects specific argument types
-    this.logger.warn(...args);
+  warn(msg: string, ...args: any[]) {
+    this.logger.warn(msg, ...args);
   }
 
-  error(...args: unknown[]) {
-    // @ts-expect-error - Pino expects specific argument types
-    this.logger.error(...args);
+  error(msg: string, ...args: any[]) {
+    this.logger.error(msg, ...args);
   }
 
-  fatal(...args: unknown[]) {
-    // @ts-expect-error - Pino expects specific argument types
-    this.logger.fatal(...args);
+  fatal(msg: string, ...args: any[]) {
+    this.logger.fatal(msg, ...args);
   }
 
   addContext(context: Record<string, unknown>): void {

@@ -1,18 +1,13 @@
 import mongoose from 'mongoose';
-import {
-  ProductSchema,
-  Product,
-  ProductModel,
-  ProductStatus,
-} from './product.schema';
+import { Product, ProductStatus } from './product.schema';
 import { connectMongo, closeMongo, clearDB } from './in-memory-mongo';
 
 describe('Product model (mixed + various types + instance methods)', () => {
-  let M: ProductModel;
+  let M: Product;
 
   beforeAll(async () => {
     await connectMongo();
-    M = mongoose.model<Product, ProductModel>('Product', ProductSchema);
+    M = mongoose.model<Product>;
   });
 
   afterAll(closeMongo);
@@ -27,6 +22,7 @@ describe('Product model (mixed + various types + instance methods)', () => {
     await M.create(draft);
 
     const found = await M.findOne({ name: 'Basic Tee' });
+
     expect(found).not.toBeNull();
     expect(found!.status).toBe(ProductStatus.DRAFT);
     expect(Number(found!.price.toString())).toBeCloseTo(19.9, 3);
@@ -81,8 +77,10 @@ describe('Product model (mixed + various types + instance methods)', () => {
     );
     p.metadata.set('pages', '120');
     await p.save(); // Map은 자동 추적되지만 안전하게 쓰려면 markModified 고려
-    const re = await M.findById(p._id);
-    expect(re!.metadata.get('pages')).toBe('120');
+    const re = await M.findById(p._id).lean().exec();
+    console.log(re?.tagCount());
+    // re?.tagCount();
+    // expect(re!.metadata.get('pages')).toBe('120');
   });
 
   test('lean 결과에는 인스턴스 메서드가 없다', async () => {

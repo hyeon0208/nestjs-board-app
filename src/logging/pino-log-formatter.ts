@@ -16,7 +16,6 @@ export function buildPinoLoggerFormatOptions(): LoggerOptions {
     // json 형식으로 출력 시킬 때 msg가 아닌 message로 출력되길 의도했는데
     // messageKey를 사용하면 항상 message가 마지막 순서로 나오게 됨. 순서는 강제할 수 없다 → 순서를 제어하려면 messageKey를 안쓰는게 나음.
     // messageKey: 'message',
-    errorKey: 'error',
     formatters: {
       level: (label) => ({ level: label }),
     },
@@ -24,7 +23,8 @@ export function buildPinoLoggerFormatOptions(): LoggerOptions {
       // 로그 호출 시점에 인자 가공
       // pino의 로거 인자는 obj, msg 라서 logger.info('메시지', { foo: 1, bar: 2})로 출력하면 2번쨰 인자는 출력되지 않음. 그래서 기존 로거 출력 방식으로 맞추기 위해 순서 swap
       logMethod(args, method) {
-        const [firstArg, secondArg, ...rest] = args;
+        const [firstArg, secondArg, ...rest] = args as unknown[];
+
         if (
           typeof firstArg === 'string' &&
           secondArg &&
@@ -34,9 +34,6 @@ export function buildPinoLoggerFormatOptions(): LoggerOptions {
         }
         return (method as any).apply(this, args);
       },
-    },
-    serializers: {
-      error: pino.stdSerializers.err,
     },
   };
 }
