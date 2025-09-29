@@ -61,6 +61,11 @@ jobs:
     - name: Generate version
       id: version
       run: |
+        echo "🔍 Deployment Debug Info:"
+        echo "build-push.result: '${{ needs.determine-environment.result }}'"
+        echo "environment: '${{ needs.determine-environment.outputs.environment }}'"
+        echo "condition check: build-push.result == 'success' is ${{ needs.determine-environment.result == 'success' }}"
+        echo "condition check: environment == 'dev' is ${{ needs.determine-environment.outputs.environment == 'dev' }}"
         SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
         TIMESTAMP=$(date +%Y.%m.%d)
         SUFFIX=${{ needs.determine-environment.outputs.environment == 'dev' && '-dev' || '-prod' }}
