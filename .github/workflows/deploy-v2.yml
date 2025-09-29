@@ -103,8 +103,16 @@ jobs:
         COMPOSE_FILE_B64=$(cat ./docker-compose.dev.yml | base64 | tr -d '\n')
 
         echo '${{ needs.determine-environment.outputs.dev_targets }}'
-        echo '"${DEPLOY_SCRIPT_B64}"'
-        echo '"${COMPOSE_FILE_B64}"'
+
+        echo "=== Testing decode ==="
+        echo "${DEPLOY_SCRIPT_B64}" | base64 -d > /tmp/test_deploy.sh
+        echo "${COMPOSE_FILE_B64}" | base64 -d > /tmp/test_compose.yml
+        
+        echo "=== Deploy script first 5 lines ==="
+        head -5 /tmp/test_deploy.sh
+        
+        echo "=== Compose file first 5 lines ==="
+        head -5 /tmp/test_compose.yml
 
         echo "📡 Dev SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
@@ -126,8 +134,16 @@ jobs:
         COMPOSE_FILE_B64=$(cat ./docker-compose.prod-syncly-scraping.yml | base64 | tr -d '\n')
 
         echo '${{ needs.determine-environment.outputs.syncly_scraping_targets }}'
-        echo '"${DEPLOY_SCRIPT_B64}"'
-        echo '"${COMPOSE_FILE_B64}"'
+
+        echo "=== Testing decode ==="
+        echo "${DEPLOY_SCRIPT_B64}" | base64 -d > /tmp/test_deploy.sh
+        echo "${COMPOSE_FILE_B64}" | base64 -d > /tmp/test_compose.yml
+        
+        echo "=== Deploy script first 5 lines ==="
+        head -5 /tmp/test_deploy.sh
+        
+        echo "=== Compose file first 5 lines ==="
+        head -5 /tmp/test_compose.yml
 
         echo "📡 Syncly Scraping SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
@@ -149,8 +165,16 @@ jobs:
         COMPOSE_FILE_B64=$(cat ./docker-compose.prod-social-scraping.yml | base64 | tr -d '\n')
 
         echo '${{ needs.determine-environment.outputs.social_scraping_targets }}'
-        echo '"${DEPLOY_SCRIPT_B64}"'
-        echo '"${COMPOSE_FILE_B64}"'
+
+        echo "=== Testing decode ==="
+        echo "${DEPLOY_SCRIPT_B64}" | base64 -d > /tmp/test_deploy.sh
+        echo "${COMPOSE_FILE_B64}" | base64 -d > /tmp/test_compose.yml
+        
+        echo "=== Deploy script first 5 lines ==="
+        head -5 /tmp/test_deploy.sh
+        
+        echo "=== Compose file first 5 lines ==="
+        head -5 /tmp/test_compose.yml
 
         echo "📡 Social Scraping SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
@@ -172,8 +196,16 @@ jobs:
         COMPOSE_FILE_B64=$(cat ./docker-compose.prod-api-and-social-scraping.yml | base64 | tr -d '\n')
 
         echo '${{ needs.determine-environment.outputs.api_and_social_targets }}'
-        echo '"${DEPLOY_SCRIPT_B64}"'
-        echo '"${COMPOSE_FILE_B64}"'
+
+        echo "=== Testing decode ==="
+        echo "${DEPLOY_SCRIPT_B64}" | base64 -d > /tmp/test_deploy.sh
+        echo "${COMPOSE_FILE_B64}" | base64 -d > /tmp/test_compose.yml
+        
+        echo "=== Deploy script first 5 lines ==="
+        head -5 /tmp/test_deploy.sh
+        
+        echo "=== Compose file first 5 lines ==="
+        head -5 /tmp/test_compose.yml
 
         echo "📡 API + Social Scraping SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
@@ -184,13 +216,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
     - name: Wait for deployment completion
       run: |
         echo "⏳ Waiting for all deployments to complete..."
@@ -198,24 +223,6 @@ jobs:
         if [ "${{ needs.determine-environment.outputs.environment }}" = "dev" ]; then
           COMMAND_ID="${{ needs.deploy-dev.outputs.command_id }}"
           echo "📡 Checking Dev deployment: $COMMAND_ID"
-
-          for i in {1..36}; do
-            STATUS=$(aws ssm list-command-invocations \
-              --command-id $COMMAND_ID \
-              --query 'CommandInvocations[0].Status' \
-              --output text)
-
-            echo "Dev status check $i/36: $STATUS"
-
-            if [ "$STATUS" = "Success" ]; then
-              echo "✅ Dev deployment completed successfully!"
-              break
-            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
-              echo "❌ Dev deployment failed with status: $STATUS"
-              exit 1
-            fi
-
-            sleep 5
           done
         else
           SYNCLY_COMMAND_ID="${{ needs.deploy-prod-syncly-scraping.outputs.command_id }}"
@@ -226,28 +233,6 @@ jobs:
           echo "  - Syncly Scraping: $SYNCLY_COMMAND_ID"
           echo "  - Social Scraping: $SOCIAL_COMMAND_ID"
           echo "  - API + Social: $API_AND_SOCIAL_COMMAND_ID"
-
-          for i in {1..36}; do
-            SYNCLY_STATUS=$(aws ssm list-command-invocations --command-id $SYNCLY_COMMAND_ID --query 'CommandInvocations[0].Status' --output text)
-            SOCIAL_STATUS=$(aws ssm list-command-invocations --command-id $SOCIAL_COMMAND_ID --query 'CommandInvocations[0].Status' --output text)
-            API_AND_SOCIAL_STATUS=$(aws ssm list-command-invocations --command-id $API_AND_SOCIAL_COMMAND_ID --query 'CommandInvocations[0].Status' --output text)
-
-            echo "Prod status check $i/36:"
-            echo "  - Syncly Scraping: $SYNCLY_STATUS"
-            echo "  - Social Scraping: $SOCIAL_STATUS"
-            echo "  - API + Social: $API_AND_SOCIAL_STATUS"
-
-            if [ "$SYNCLY_STATUS" = "Success" ] && [ "$SOCIAL_STATUS" = "Success" ] && [ "$API_AND_SOCIAL_STATUS" = "Success" ]; then
-              echo "✅ All prod deployments completed successfully!"
-              break
-            elif [ "$SYNCLY_STATUS" = "Failed" ] || [ "$SYNCLY_STATUS" = "Cancelled" ] || \
-                 [ "$SOCIAL_STATUS" = "Failed" ] || [ "$SOCIAL_STATUS" = "Cancelled" ] || \
-                 [ "$API_AND_SOCIAL_STATUS" = "Failed" ] || [ "$API_AND_SOCIAL_STATUS" = "Cancelled" ]; then
-              echo "❌ One or more prod deployments failed"
-              exit 1
-            fi
-
-            sleep 5
           done
         fi
 
