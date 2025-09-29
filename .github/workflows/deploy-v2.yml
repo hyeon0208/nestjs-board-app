@@ -82,7 +82,7 @@ jobs:
 
   deploy:
     needs: [determine-environment, build-push]
-    if: needs.build-push.result == 'success' && needs.determine-environment.outputs.environment == 'dev'
+    if: always() && needs.build-push.result == 'success' && needs.determine-environment.outputs.environment == 'dev'
     runs-on: ubuntu-latest
     
     steps:
