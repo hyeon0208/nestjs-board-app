@@ -133,7 +133,11 @@ jobs:
       id: deploy
       run: |
         DEPLOY_SCRIPT_B64=$(cat ./scripts/deploy.sh | base64 | tr -d '\n')
-        COMPOSE_FILE_B64=$(cat ./docker-compose.prod-syncly-scraping.yml | base64 | tr -d '\n')
+        COMPOSE_FILE_B64=$(cat ./docker-compose.yml | base64 | tr -d '\n')
 
+        echo '${{ needs.determine-environment.outputs.environment }}'
+        echo "${{ needs.determine-environment.outputs.environment}}"
+        echo '"${DEPLOY_SCRIPT_B64}"' | base64 -d > ~/temp/deploy.sh
+        echo '"${COMPOSE_FILE_B64}"' | base64 -d > ~/temp/docker-compose.yml
         echo "📡 Syncly Scraping SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
