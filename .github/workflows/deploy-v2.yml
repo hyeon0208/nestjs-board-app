@@ -40,7 +40,6 @@ jobs:
     - name: Wait for production approval
       run: echo "🔒 Production deployment requires approval"
 
-
   build-push:
     needs: [determine-environment, approval]
     if: always() && needs.determine-environment.result == 'success'
