@@ -51,8 +51,8 @@ jobs:
       run: echo "🔒 Production deployment requires approval"
 
   build-push:
-    needs: [determine-environment]
-    if: always() && needs.determine-environment.result == 'success'
+    needs: [determine-environment, approval]
+    if: always() && needs.determine-environment.result == 'success' && (needs.determine-environment.outputs.environment == 'dev' || needs.approval.result == 'success')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -149,6 +149,7 @@ jobs:
         echo "=== Compose file first 5 lines ==="
         head -5 /tmp/test_compose.yml
 
+        COMMAND_ID="syncly-scraping-$(date +%s)-$(echo $RANDOM)"
         echo "📡 Syncly Scraping SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
 
@@ -182,6 +183,7 @@ jobs:
         echo "=== Compose file first 5 lines ==="
         head -5 /tmp/test_compose.yml
 
+        COMMAND_ID="social-scraping-$(date +%s)-$(echo $RANDOM)"
         echo "📡 Social Scraping SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
 
@@ -215,6 +217,7 @@ jobs:
         echo "=== Compose file first 5 lines ==="
         head -5 /tmp/test_compose.yml
 
+        COMMAND_ID="api_and_social_targets-$(date +%s)-$(echo $RANDOM)"
         echo "📡 API + Social Scraping SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
 
