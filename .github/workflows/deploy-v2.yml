@@ -31,12 +31,6 @@ jobs:
       run: |
         echo "environment=${{ inputs.target_environment }}" >> $GITHUB_OUTPUT
         
-        if [ "${{ inputs.target_environment }}" = "dev" ]; then
-          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["dev"]},{"Key":"tag:App","Values":["${{ env.APP_NAME }}"]}]' >> $GITHUB_OUTPUT
-        else
-          echo 'ssm_targets=[{"Key":"tag:Environment","Values":["prod"]},{"Key":"tag:App","Values":["${{ env.APP_NAME }}"]}]' >> $GITHUB_OUTPUT
-        fi
-
   approval: # prod 환경일 때만 실행 수동 승인 필요
     needs: [determine-environment]
     if: needs.determine-environment.outputs.environment == 'prod'
@@ -46,9 +40,10 @@ jobs:
     - name: Wait for production approval
       run: echo "🔒 Production deployment requires approval"
 
+
   build-push:
     needs: [determine-environment, approval]
-    if: always() && needs.determine-environment.result == 'success' && (needs.determine-environment.outputs.environment != 'prod' || needs.approval.result == 'success')
+    if: always() && needs.determine-environment.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -73,25 +68,14 @@ jobs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "🚀 [${{ needs.determine-environment.outputs.environment }}] New version: $VERSION"
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
-
     - name: Build and push to ECR
       id: build
       run: |
         ECR_REPOSITORY="${{ env.APP_NAME }}-${{ needs.determine-environment.outputs.environment }}"
         IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${{ steps.version.outputs.version }}
         
-        docker build -t $IMAGE_URI .
-        docker push $IMAGE_URI
+        # docker build -t $IMAGE_URI .
+        # docker push $IMAGE_URI
         
         echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
         echo "🚀 Pushed: $IMAGE_URI"
@@ -103,27 +87,9 @@ jobs:
     environment: ${{ needs.determine-environment.outputs.environment }}
     
     steps:
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
     - name: Trigger SSM Deploy Command
       id: deploy
       run: |
-        COMMAND_ID=$(aws ssm send-command \
-          --document-name "AWS-RunShellScript" \
-          --targets "${{ needs.determine-environment.outputs.ssm_targets }}" \
-          --parameters 'commands=[
-            "aws s3 cp s3://${{ env.S3_BUCKET }}/scripts/deploy.sh ~/deploy.sh --force",
-            "chmod +x ~/deploy.sh",
-            "~/deploy.sh ${{ env.APP_NAME }} ${{ needs.determine-environment.outputs.environment }} ${{ needs.build-push.outputs.image_uri }}"
-          ]' \
-          --comment "Deploy ${{ env.APP_NAME }} ${{ needs.build-push.outputs.image_uri }} to ${{ needs.determine-environment.outputs.environment }}" \
-          --region ${{ env.AWS_REGION }} \
-          --output text --query 'Command.CommandId')
         
         echo "📡 SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
