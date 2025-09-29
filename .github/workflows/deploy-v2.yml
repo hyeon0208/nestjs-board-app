@@ -82,7 +82,7 @@ jobs:
 
   deploy:
     needs: [determine-environment, build-push]
-    if: always() && needs.build-push.result == 'success' && needs.determine-environment.outputs.environment == 'dev'
+    if: needs.build-push.result == 'success' && needs.determine-environment.outputs.environment == 'dev'
     runs-on: ubuntu-latest
     
     steps:
@@ -118,3 +118,22 @@ jobs:
         
         echo "⏰ Deployment timed out after 3 minutes"
         exit 1
+
+  deploy-prod-syncly-scraping:
+    needs: [determine-environment, build-push, approval]
+    if: needs.build-push.result == 'success' && needs.determine-environment.outputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: prod
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to Syncly Scraping Servers
+      id: deploy
+      run: |
+        DEPLOY_SCRIPT_B64=$(cat ./scripts/deploy.sh | base64 | tr -d '\n')
+        COMPOSE_FILE_B64=$(cat ./docker-compose.prod-syncly-scraping.yml | base64 | tr -d '\n')
+
+        echo "📡 Syncly Scraping SSM Command ID: $COMMAND_ID"
+        echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
