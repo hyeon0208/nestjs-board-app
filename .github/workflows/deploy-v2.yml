@@ -121,7 +121,7 @@ jobs:
 
   deploy-prod-syncly-scraping:
     needs: [determine-environment, build-push, approval]
-    if: needs.build-push.result == 'success' && needs.determine-environment.outputs.environment == 'prod'
+    if: needs.build-push.result == 'success' && needs.determine-environment.outputs.environment == 'prod' && needs.approval.result == 'success'
     runs-on: ubuntu-latest
     environment: prod
 
