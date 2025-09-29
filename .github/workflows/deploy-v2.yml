@@ -16,21 +16,31 @@ permissions:
 
 env:
   AWS_REGION: ap-northeast-2
-  APP_NAME: test-app
-  S3_BUCKET: test-app-bucket
+  APP_NAME: syncly-scraper
+  S3_BUCKET: syncly-crawling-bucket
 
 jobs:
   determine-environment:
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.env.outputs.environment }}
-      ssm_targets: ${{ steps.env.outputs.ssm_targets }}
+      dev_targets: ${{ steps.env.outputs.dev_targets }}
+      syncly_scraping_targets: ${{ steps.env.outputs.syncly_scraping_targets }}
+      social_scraping_targets: ${{ steps.env.outputs.social_scraping_targets }}
+      api_and_social_targets: ${{ steps.env.outputs.api_and_social_targets }}
     steps:
     - name: Determine environment and SSM targets
       id: env
       run: |
         echo "environment=${{ inputs.target_environment }}" >> $GITHUB_OUTPUT
-        
+        if [ "${{ inputs.target_environment }}" = "dev" ]; then
+          echo 'dev_targets=Key=tag:Environment,Values=dev Key=tag:App,Values=${{ env.APP_NAME }}' >> $GITHUB_OUTPUT
+        else
+          echo 'syncly_scraping_targets=Key=tag:Environment,Values=prod Key=tag:App,Values=${{ env.APP_NAME }} Key=tag:Role,Values=syncly-scraping' >> $GITHUB_OUTPUT
+          echo 'social_scraping_targets=Key=tag:Environment,Values=prod Key=tag:App,Values=${{ env.APP_NAME }} Key=tag:Role,Values=social-scraping' >> $GITHUB_OUTPUT
+          echo 'api_and_social_targets=Key=tag:Environment,Values=prod Key=tag:App,Values=${{ env.APP_NAME }} Key=tag:Role,Values=api-and-social-scraping' >> $GITHUB_OUTPUT
+        fi
+
   approval: # prod 환경일 때만 실행 수동 승인 필요
     needs: [determine-environment]
     if: needs.determine-environment.outputs.environment == 'prod'
@@ -41,7 +51,7 @@ jobs:
       run: echo "🔒 Production deployment requires approval"
 
   build-push:
-    needs: [determine-environment, approval]
+    needs: [determine-environment]
     if: always() && needs.determine-environment.result == 'success'
     runs-on: ubuntu-latest
     outputs:
@@ -55,11 +65,6 @@ jobs:
     - name: Generate version
       id: version
       run: |
-        echo "🔍 Deployment Debug Info:"
-        echo "build-push.result: '${{ needs.determine-environment.result }}'"
-        echo "environment: '${{ needs.determine-environment.outputs.environment }}'"
-        echo "condition check: build-push.result == 'success' is ${{ needs.determine-environment.result == 'success' }}"
-        echo "condition check: environment == 'dev' is ${{ needs.determine-environment.outputs.environment == 'dev' }}"
         SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
         TIMESTAMP=$(date +%Y.%m.%d)
         SUFFIX=${{ needs.determine-environment.outputs.environment == 'dev' && '-dev' || '-prod' }}
@@ -69,35 +74,40 @@ jobs:
 
     - name: Build and push to ECR
       id: build
+      env:
+        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
       run: |
         ECR_REPOSITORY="${{ env.APP_NAME }}-${{ needs.determine-environment.outputs.environment }}"
         IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${{ steps.version.outputs.version }}
         
-        # docker build -t $IMAGE_URI .
+        # DOCKER_BUILDKIT=1 docker build --secret id=sentry_token,env=SENTRY_AUTH_TOKEN -t $IMAGE_URI .
+
         # docker push $IMAGE_URI
         
         echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
         echo "🚀 Pushed: $IMAGE_URI"
 
-  deploy:
+  deploy-dev:
     needs: [determine-environment, build-push]
     if: always() && needs.build-push.result == 'success' && needs.determine-environment.outputs.environment == 'dev'
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Trigger SSM Deploy Command
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to Dev Environment
       id: deploy
       run: |
-        
-        echo "📡 SSM Command ID: $COMMAND_ID"
+        DEPLOY_SCRIPT_B64=$(cat ./scripts/deploy.sh | base64 | tr -d '\n')
+        COMPOSE_FILE_B64=$(cat ./docker-compose.dev.yml | base64 | tr -d '\n')
+
+        echo '${{ needs.determine-environment.outputs.dev_targets }}'
+        echo '"${DEPLOY_SCRIPT_B64}"'
+        echo '"${COMPOSE_FILE_B64}"'
+
+        echo "📡 Dev SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
-
-    - name: Wait for deployment completion
-      run: |
-        echo "⏳ Waiting for deployment to complete..."
-
-        echo "⏰ Deployment timed out after 3 minutes"
-        exit 1
 
   deploy-prod-syncly-scraping:
     needs: [determine-environment, build-push, approval]
@@ -113,14 +123,133 @@ jobs:
       id: deploy
       run: |
         DEPLOY_SCRIPT_B64=$(cat ./scripts/deploy.sh | base64 | tr -d '\n')
-        COMPOSE_FILE_B64=$(cat ./docker-compose.yml | base64 | tr -d '\n')
+        COMPOSE_FILE_B64=$(cat ./docker-compose.prod-syncly-scraping.yml | base64 | tr -d '\n')
 
-        echo '${{ needs.determine-environment.outputs.environment }}'
-        echo "${{ needs.determine-environment.outputs.environment}}"
+        echo '${{ needs.determine-environment.outputs.syncly_scraping_targets }}'
+        echo '"${DEPLOY_SCRIPT_B64}"'
+        echo '"${COMPOSE_FILE_B64}"'
 
-        mkdir -p ~/temp
-
-        echo "${DEPLOY_SCRIPT_B64}" | base64 -d > ~/temp/deploy.sh
-        echo "${COMPOSE_FILE_B64}" | base64 -d > ~/temp/docker-compose.yml
         echo "📡 Syncly Scraping SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
+
+  deploy-prod-social-scraping:
+    needs: [determine-environment, build-push, approval]
+    if: needs.build-push.result == 'success' && needs.determine-environment.outputs.environment == 'prod' && needs.approval.result == 'success'
+    runs-on: ubuntu-latest
+    environment: prod
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to Social Scraping Servers
+      id: deploy
+      run: |
+        DEPLOY_SCRIPT_B64=$(cat ./scripts/deploy.sh | base64 | tr -d '\n')
+        COMPOSE_FILE_B64=$(cat ./docker-compose.prod-social-scraping.yml | base64 | tr -d '\n')
+
+        echo '${{ needs.determine-environment.outputs.social_scraping_targets }}'
+        echo '"${DEPLOY_SCRIPT_B64}"'
+        echo '"${COMPOSE_FILE_B64}"'
+
+        echo "📡 Social Scraping SSM Command ID: $COMMAND_ID"
+        echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
+
+  deploy-prod-api-and-social:
+    needs: [determine-environment, build-push, approval]
+    if: needs.build-push.result == 'success' && needs.determine-environment.outputs.environment == 'prod' && needs.approval.result == 'success'
+    runs-on: ubuntu-latest
+    environment: prod
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to API + Social Scraping Servers
+      id: deploy
+      run: |
+        DEPLOY_SCRIPT_B64=$(cat ./scripts/deploy.sh | base64 | tr -d '\n')
+        COMPOSE_FILE_B64=$(cat ./docker-compose.prod-api-and-social-scraping.yml | base64 | tr -d '\n')
+
+        echo '${{ needs.determine-environment.outputs.api_and_social_targets }}'
+        echo '"${DEPLOY_SCRIPT_B64}"'
+        echo '"${COMPOSE_FILE_B64}"'
+
+        echo "📡 API + Social Scraping SSM Command ID: $COMMAND_ID"
+        echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
+
+  wait-for-deployment-completion:
+    needs: [determine-environment, deploy-dev, deploy-prod-syncly-scraping, deploy-prod-social-scraping, deploy-prod-api-and-social]
+    if: always() && (needs.deploy-dev.result == 'success' || (needs.deploy-prod-syncly-scraping.result == 'success' && needs.deploy-prod-social-scraping.result == 'success' && needs.deploy-prod-api-and-social.result == 'success'))
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Wait for deployment completion
+      run: |
+        echo "⏳ Waiting for all deployments to complete..."
+
+        if [ "${{ needs.determine-environment.outputs.environment }}" = "dev" ]; then
+          COMMAND_ID="${{ needs.deploy-dev.outputs.command_id }}"
+          echo "📡 Checking Dev deployment: $COMMAND_ID"
+
+          for i in {1..36}; do
+            STATUS=$(aws ssm list-command-invocations \
+              --command-id $COMMAND_ID \
+              --query 'CommandInvocations[0].Status' \
+              --output text)
+
+            echo "Dev status check $i/36: $STATUS"
+
+            if [ "$STATUS" = "Success" ]; then
+              echo "✅ Dev deployment completed successfully!"
+              break
+            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
+              echo "❌ Dev deployment failed with status: $STATUS"
+              exit 1
+            fi
+
+            sleep 5
+          done
+        else
+          SYNCLY_COMMAND_ID="${{ needs.deploy-prod-syncly-scraping.outputs.command_id }}"
+          SOCIAL_COMMAND_ID="${{ needs.deploy-prod-social-scraping.outputs.command_id }}"
+          API_AND_SOCIAL_COMMAND_ID="${{ needs.deploy-prod-api-and-social.outputs.command_id }}"
+
+          echo "📡 Checking Prod deployments:"
+          echo "  - Syncly Scraping: $SYNCLY_COMMAND_ID"
+          echo "  - Social Scraping: $SOCIAL_COMMAND_ID"
+          echo "  - API + Social: $API_AND_SOCIAL_COMMAND_ID"
+
+          for i in {1..36}; do
+            SYNCLY_STATUS=$(aws ssm list-command-invocations --command-id $SYNCLY_COMMAND_ID --query 'CommandInvocations[0].Status' --output text)
+            SOCIAL_STATUS=$(aws ssm list-command-invocations --command-id $SOCIAL_COMMAND_ID --query 'CommandInvocations[0].Status' --output text)
+            API_AND_SOCIAL_STATUS=$(aws ssm list-command-invocations --command-id $API_AND_SOCIAL_COMMAND_ID --query 'CommandInvocations[0].Status' --output text)
+
+            echo "Prod status check $i/36:"
+            echo "  - Syncly Scraping: $SYNCLY_STATUS"
+            echo "  - Social Scraping: $SOCIAL_STATUS"
+            echo "  - API + Social: $API_AND_SOCIAL_STATUS"
+
+            if [ "$SYNCLY_STATUS" = "Success" ] && [ "$SOCIAL_STATUS" = "Success" ] && [ "$API_AND_SOCIAL_STATUS" = "Success" ]; then
+              echo "✅ All prod deployments completed successfully!"
+              break
+            elif [ "$SYNCLY_STATUS" = "Failed" ] || [ "$SYNCLY_STATUS" = "Cancelled" ] || \
+                 [ "$SOCIAL_STATUS" = "Failed" ] || [ "$SOCIAL_STATUS" = "Cancelled" ] || \
+                 [ "$API_AND_SOCIAL_STATUS" = "Failed" ] || [ "$API_AND_SOCIAL_STATUS" = "Cancelled" ]; then
+              echo "❌ One or more prod deployments failed"
+              exit 1
+            fi
+
+            sleep 5
+          done
+        fi
+
+        echo "⏰ Deployment status check completed"
+
