@@ -116,6 +116,7 @@ jobs:
         echo "=== Compose file first 5 lines ==="
         head -5 /tmp/test_compose.yml
 
+        COMMAND_ID="dev-$(date +%s)-$(echo $RANDOM)"
         echo "📡 Dev SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
 
