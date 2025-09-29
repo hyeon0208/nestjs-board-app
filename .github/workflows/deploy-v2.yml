@@ -95,26 +95,7 @@ jobs:
     - name: Wait for deployment completion
       run: |
         echo "⏳ Waiting for deployment to complete..."
-        
-        for i in {1..36}; do
-          STATUS=$(aws ssm list-command-invocations \
-            --command-id ${{ steps.deploy.outputs.command_id }} \
-            --query 'CommandInvocations[0].Status' \
-            --output text)
-          
-          echo "Status check $i/36: $STATUS"
-          
-          if [ "$STATUS" = "Success" ]; then
-            echo "✅ Deployment completed successfully!"
-            exit 0
-          elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
-            echo "❌ Deployment failed with status: $STATUS"
-            exit 1
-          fi
-          
-          sleep 5
-        done
-        
+
         echo "⏰ Deployment timed out after 3 minutes"
         exit 1
 
@@ -136,7 +117,10 @@ jobs:
 
         echo '${{ needs.determine-environment.outputs.environment }}'
         echo "${{ needs.determine-environment.outputs.environment}}"
-        echo '"${DEPLOY_SCRIPT_B64}"' | base64 -d > ~/temp/deploy.sh
-        echo '"${COMPOSE_FILE_B64}"' | base64 -d > ~/temp/docker-compose.yml
+
+        mkdir -p ~/temp
+
+        echo "${DEPLOY_SCRIPT_B64}" | base64 -d > ~/temp/deploy.sh
+        echo "${COMPOSE_FILE_B64}" | base64 -d > ~/temp/docker-compose.yml
         echo "📡 Syncly Scraping SSM Command ID: $COMMAND_ID"
         echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
